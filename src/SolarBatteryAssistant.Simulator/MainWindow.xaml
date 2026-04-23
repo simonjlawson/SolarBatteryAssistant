@@ -33,6 +33,9 @@
             <Label Content="Daily Load kWh:" VerticalAlignment="Center" Margin="4,0,0,0"/>
             <TextBox x:Name="DemoDailyLoadBox" Width="45" VerticalAlignment="Center" Text="8"
                      ToolTip="Estimated total house energy use per day in kWh (default 8 kWh)"/>
+            <Label Content="Constant W:" VerticalAlignment="Center" Margin="4,0,0,0"/>
+            <TextBox x:Name="DemoConstantLoadBox" Width="45" VerticalAlignment="Center" Text="100"
+                     ToolTip="Always-on baseline load in Watts added to every slot (fridges, routers, standby devices). Default 100 W."/>
             <Label Content="Cheap ≤" VerticalAlignment="Center" Margin="4,0,0,0"/>
             <TextBox x:Name="DemoCheapThresholdBox" Width="35" VerticalAlignment="Center" Text="2"
                      ToolTip="Import price threshold in p/kWh — slots at or below this always trigger charging (catches negative / near-zero prices)"/>

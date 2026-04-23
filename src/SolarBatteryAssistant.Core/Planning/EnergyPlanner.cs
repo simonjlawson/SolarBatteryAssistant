@@ -171,7 +171,7 @@ public class EnergyPlanner : IEnergyPlanner
     private double ComputeSlotLoadWatts(TimeOnly localSlotTime)
     {
         if (_batteryConfig.EstimatedDailyLoadWh <= 0)
-            return _batteryConfig.EstimatedHouseLoadWatts;
+            return _batteryConfig.EstimatedHouseLoadWatts + _batteryConfig.ConstantLoadWatts;
 
         int startH = _batteryConfig.LoadActiveStartHour;
         int endH = _batteryConfig.LoadActiveEndHour;
@@ -196,7 +196,7 @@ public class EnergyPlanner : IEnergyPlanner
 
         int hour = localSlotTime.Hour;
         bool inActiveWindow = hour >= startH && hour < endH;
-        return inActiveWindow ? activeWatts : offPeakWatts;
+        return (inActiveWindow ? activeWatts : offPeakWatts) + _batteryConfig.ConstantLoadWatts;
     }
 
     private void AssignActions(List<PlanSlot> slots, double initialChargePercent)

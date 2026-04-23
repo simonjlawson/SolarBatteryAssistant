@@ -95,6 +95,7 @@ public partial class MainWindow : Window
         double soc = double.TryParse(DemoBatteryBox.Text, out var s) ? Math.Clamp(s, 0, 100) : 50.0;
         double solarKwh = double.TryParse(DemoSolarBox.Text, out var kw) ? Math.Max(0, kw) : 20.0;
         double dailyLoadKwh = double.TryParse(DemoDailyLoadBox.Text, out var dl) ? Math.Max(0, dl) : 8.0;
+        double constantLoadWatts = double.TryParse(DemoConstantLoadBox.Text, out var cl) ? Math.Max(0, cl) : 100.0;
         decimal cheapThreshold = decimal.TryParse(DemoCheapThresholdBox.Text, out var ct) ? ct : 2.0m;
         decimal? staticExport = decimal.TryParse(DemoStaticExportBox.Text, out var se) ? se : (decimal?)null;
         bool allowExport = DemoAllowExportBox.IsChecked ?? true;
@@ -109,7 +110,7 @@ public partial class MainWindow : Window
         var prices = new DemoEnergyPriceProvider();
 
         // Create planner using the Core service (needs DI for config defaults)
-        var host = BuildDemoHost(battery, solar, prices, dailyLoadKwh, cheapThreshold, staticExport, allowExport, allowGridCharging);
+        var host = BuildDemoHost(battery, solar, prices, dailyLoadKwh, constantLoadWatts, cheapThreshold, staticExport, allowExport, allowGridCharging);
         await host.StartAsync();
         _serviceHost = host;
 
@@ -381,6 +382,7 @@ public partial class MainWindow : Window
         DemoSolarForecastProvider solar,
         DemoEnergyPriceProvider prices,
         double dailyLoadKwh = 8.0,
+        double constantLoadWatts = 100.0,
         decimal cheapThresholdPence = 2.0m,
         decimal? staticExportPence = null,
         bool allowExport = true,
@@ -393,6 +395,8 @@ public partial class MainWindow : Window
                 {
                     [$"{DaemonConfiguration.SectionName}:Battery:EstimatedDailyLoadWh"] =
                         (dailyLoadKwh * 1000).ToString("F0"),
+                    [$"{DaemonConfiguration.SectionName}:Battery:ConstantLoadWatts"] =
+                        constantLoadWatts.ToString("F0"),
                     [$"{DaemonConfiguration.SectionName}:Planning:VeryCheapImportThresholdPence"] =
                         cheapThresholdPence.ToString("F2"),
                     [$"{DaemonConfiguration.SectionName}:Planning:AllowExport"] =

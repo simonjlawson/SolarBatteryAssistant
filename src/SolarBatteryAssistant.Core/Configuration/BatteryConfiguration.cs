@@ -64,4 +64,12 @@ public class BatteryConfiguration
     /// When set, this is used instead of <see cref="EstimatedHouseLoadWatts"/>.
     /// </summary>
     public string? HouseLoadEntityId { get; set; }
+
+    /// <summary>
+    /// A constant baseline load in Watts that is always present regardless of time of day
+    /// (e.g. always-on devices such as fridges, routers, standby equipment).
+    /// This is added on top of the time-of-day-profiled load in every slot.
+    /// Default 100 W.
+    /// </summary>
+    public double ConstantLoadWatts { get; set; } = 100;
 }
