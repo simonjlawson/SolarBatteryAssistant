@@ -14,6 +14,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <RootNamespace>SolarBatteryAssistant.Simulator</RootNamespace>
     <AssemblyName>SolarBatteryAssistant.Simulator</AssemblyName>
+    <UserSecretsId>24cac837-3450-4aa4-95b0-2c327ef7be99</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
