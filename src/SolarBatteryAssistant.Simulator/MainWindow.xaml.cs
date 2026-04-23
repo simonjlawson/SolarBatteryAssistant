@@ -5,6 +5,7 @@ using System.Windows.Media;
 using LiveCharts;
 using LiveCharts.Wpf;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.UserSecrets;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using SolarBatteryAssistant.Core;
@@ -52,6 +53,22 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContext = _viewModel;
         DateSelector.SelectedDate = DateTime.Today;
+
+        // Try to autofill HomeAssistant token from user secrets (key: HATOKEN)
+        try
+        {
+            var secretConfig = new ConfigurationBuilder()
+                .AddUserSecrets<MainWindow>()
+                .Build();
+
+            var haToken = secretConfig["HATOKEN"];
+            if (!string.IsNullOrWhiteSpace(haToken))
+                HaTokenBox.Password = haToken;
+        }
+        catch
+        {
+            // Ignore failures loading user secrets — simulator should still work without them
+        }
 
         PriceChart.Series = _viewModel.PriceSeries;
         BatteryChart.Series = _viewModel.BatterySeries;
