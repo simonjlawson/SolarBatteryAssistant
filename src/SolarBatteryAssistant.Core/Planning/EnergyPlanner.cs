@@ -7,21 +7,27 @@ using Microsoft.Extensions.Options;
 namespace SolarBatteryAssistant.Core.Planning;
 
 /// <summary>
-/// Greedy/dynamic planning engine that assigns the cheapest battery action to each
-/// 30-minute slot for the day, subject to battery capacity and power constraints.
+/// Greedy planning engine that assigns the cheapest battery action to each 30-minute
+/// slot for the day, subject to battery capacity and power constraints.
 ///
-/// Strategy:
-///   1. Sort slots by price to identify cheapest import and most expensive export opportunities.
-///   2. For each slot in time order:
-///      - If import price is in the cheapest N slots AND battery not full AND AllowGridCharging:
-///        ImportFromGrid
-///      - If export price is in the most expensive N slots AND battery has charge AND AllowExport:
-///        ExportToGrid
-///      - If solar generation > house load (excess solar) AND battery full:
-///        BypassBatteryOnlyUseGrid  (avoid wasting charge cycles)
-///      - Otherwise:
-///        NormalBatteryMinimiseGrid
-///   3. Battery SoC is simulated forward to enforce capacity constraints.
+/// Strategy (evaluated in priority order for each slot):
+///   1. <b>ExportToGrid</b> — slot is among the most expensive export windows AND battery
+///      has sufficient charge above minimum.
+///   2. <b>ImportFromGrid</b> — slot is among the cheapest import windows OR the import
+///      price is at or below <see cref="PlanningConfiguration.VeryChapImportThresholdPence"/>
+///      (catches negative and near-zero prices) AND battery is not already full.
+///   3. <b>BypassBatteryOnlyUseGrid (economic)</b> — import is not cheap enough to charge,
+///      but a future profitable export slot exists; bypass battery (let grid cover load) to
+///      preserve charge for that later export.
+///   4. <b>BypassBatteryOnlyUseGrid (solar)</b> — battery is full and solar generation
+///      exceeds house load; bypass to avoid unnecessary charge cycling.
+///   5. <b>NormalBatteryMinimiseGrid</b> — default.
+///
+/// House load is distributed across the day using a configurable daily total with the
+/// majority of consumption concentrated in a configurable active window (default 09:00–21:00).
+///
+/// Cost calculations include income from exporting surplus solar to the grid at either the
+/// dynamic per-slot export price or a configured static export rate.
 /// </summary>
 public class EnergyPlanner : IEnergyPlanner
 {
@@ -68,7 +74,6 @@ public class EnergyPlanner : IEnergyPlanner
             SolarForecast = solarForecast
         };
 
-        // Build slot list for the full day
         var slots = BuildSlots(planDate, prices, solarProfile, tz);
         if (!slots.Any())
         {
@@ -77,7 +82,6 @@ public class EnergyPlanner : IEnergyPlanner
             return Task.FromResult(plan);
         }
 
-        // Assign actions using greedy optimiser
         AssignActions(slots, currentBatteryState.ChargePercent);
 
         plan.Slots = slots;
@@ -100,16 +104,12 @@ public class EnergyPlanner : IEnergyPlanner
 
         var now = DateTimeOffset.UtcNow;
 
-        // Mark completed slots
         foreach (var slot in currentPlan.Slots.Where(s => s.SlotEnd <= now))
             slot.IsCompleted = true;
 
-        // Re-optimise remaining slots with current battery state
         var pendingSlots = currentPlan.Slots.Where(s => !s.IsCompleted).ToList();
         if (pendingSlots.Count > 0)
-        {
             AssignActions(pendingSlots, currentBatteryState.ChargePercent);
-        }
 
         currentPlan.GeneratedAt = now;
         currentPlan.InitialBatteryState = currentBatteryState;
@@ -136,13 +136,28 @@ public class EnergyPlanner : IEnergyPlanner
 
             solarProfile.TryGetValue(timeKey, out double solarWatts);
 
+            // Resolve the effective export price: dynamic from tariff or static fallback
+            decimal? effectiveExportPrice = price.ExportPencePerKwh ?? _planConfig.StaticExportPencePerKwh;
+
+            // Create a price object with the effective export price applied so all
+            // downstream calculations use the same price reference
+            var resolvedPrice = effectiveExportPrice == price.ExportPencePerKwh
+                ? price
+                : new EnergyPrice
+                {
+                    SlotStart = price.SlotStart,
+                    SlotEnd = price.SlotEnd,
+                    ImportPencePerKwh = price.ImportPencePerKwh,
+                    ExportPencePerKwh = effectiveExportPrice
+                };
+
             slots.Add(new PlanSlot
             {
                 SlotStart = price.SlotStart,
                 SlotEnd = price.SlotEnd,
-                Price = price,
+                Price = resolvedPrice,
                 SolarWatts = solarWatts,
-                EstimatedLoadWatts = _batteryConfig.EstimatedHouseLoadWatts,
+                EstimatedLoadWatts = ComputeSlotLoadWatts(timeKey),
                 Action = BatteryAction.NormalBatteryMinimiseGrid
             });
         }
@@ -150,22 +165,65 @@ public class EnergyPlanner : IEnergyPlanner
         return slots;
     }
 
+    /// <summary>
+    /// Returns the estimated house load in Watts for a given local half-hour slot.
+    /// When <see cref="BatteryConfiguration.EstimatedDailyLoadWh"/> is configured the
+    /// load is distributed using the active-window profile; otherwise the flat
+    /// <see cref="BatteryConfiguration.EstimatedHouseLoadWatts"/> is used.
+    /// </summary>
+    private double ComputeSlotLoadWatts(TimeOnly localSlotTime)
+    {
+        if (_batteryConfig.EstimatedDailyLoadWh <= 0)
+            return _batteryConfig.EstimatedHouseLoadWatts;
+
+        int startH = _batteryConfig.LoadActiveStartHour;
+        int endH = _batteryConfig.LoadActiveEndHour;
+        double dailyWh = _batteryConfig.EstimatedDailyLoadWh;
+        double activeProp = Math.Clamp(_batteryConfig.LoadActiveProportion, 0.0, 1.0);
+
+        // Clamp to valid range (end > start, both 0-23)
+        if (startH < 0 || startH >= 24) startH = 9;
+        if (endH <= startH || endH > 24) endH = startH + 12;
+
+        int activeHours = endH - startH;
+        int offPeakHours = 24 - activeHours;
+
+        // Watts per slot = Wh per hour (each slot is 30 minutes = 0.5 h, but load is in Watts so Wh = W × 0.5)
+        // We want average Watts in the slot: activeWh = dailyWh * activeProp, spread across activeHours hours.
+        double activeWatts = activeHours > 0
+            ? (dailyWh * activeProp) / activeHours
+            : 0;
+        double offPeakWatts = offPeakHours > 0
+            ? (dailyWh * (1 - activeProp)) / offPeakHours
+            : 0;
+
+        int hour = localSlotTime.Hour;
+        bool inActiveWindow = hour >= startH && hour < endH;
+        return inActiveWindow ? activeWatts : offPeakWatts;
+    }
+
     private void AssignActions(List<PlanSlot> slots, double initialChargePercent)
     {
         if (!slots.Any()) return;
 
-        // Identify cheap import windows (bottom 25% of prices)
+        // Identify cheap import windows (bottom 25% of prices by rank)
         var sortedByImport = slots.OrderBy(s => s.Price.ImportPencePerKwh).ToList();
         int cheapCount = Math.Max(1, sortedByImport.Count / 4);
         var cheapSlots = sortedByImport.Take(cheapCount).Select(s => s.SlotStart).ToHashSet();
 
-        // Identify expensive export windows (top 25% of prices where export exists)
-        var exportSlots = slots
+        // Identify expensive export windows (top 25% of slots that have an export price)
+        var exportableSlots = slots
             .Where(s => s.Price.ExportPencePerKwh.HasValue)
             .OrderByDescending(s => s.Price.ExportPencePerKwh!.Value)
             .ToList();
-        int expensiveCount = Math.Max(1, exportSlots.Count / 4);
-        var expensiveExportSlots = exportSlots.Take(expensiveCount).Select(s => s.SlotStart).ToHashSet();
+        int expensiveCount = Math.Max(1, exportableSlots.Count / 4);
+        var expensiveExportSlots = exportableSlots.Take(expensiveCount).Select(s => s.SlotStart).ToHashSet();
+
+        // Precompute the latest expensive-export slot time; used to determine whether a
+        // future export opportunity still exists while iterating forward in time.
+        DateTimeOffset latestExportOpportunity = expensiveExportSlots.Any()
+            ? expensiveExportSlots.Max()
+            : DateTimeOffset.MinValue;
 
         double batteryPercent = initialChargePercent;
         double capacityWh = _batteryConfig.CapacityWh;
@@ -182,29 +240,57 @@ public class EnergyPlanner : IEnergyPlanner
             BatteryAction action;
             double batteryDeltaWh = 0;
 
+            // A slot qualifies as "very cheap" if its price is at or below the configured
+            // threshold — this covers negative prices and near-zero tariffs regardless of
+            // how the day's prices rank relative to each other.
+            bool isVeryCheap = slot.Price.ImportPencePerKwh <= _planConfig.VeryCheapImportThresholdPence;
+
             bool canCharge = _planConfig.AllowGridCharging
                 && batteryPercent < maxPercent
-                && cheapSlots.Contains(slot.SlotStart);
+                && (cheapSlots.Contains(slot.SlotStart) || isVeryCheap);
 
             bool canExport = _planConfig.AllowExport
                 && slot.Price.ExportPencePerKwh.HasValue
                 && batteryPercent > minPercent
-                && expensiveExportSlots.Contains(slot.SlotStart);
+                && expensiveExportSlots.Contains(slot.SlotStart)
+                // Only export if we earn more than we'd spend re-importing later
+                && slot.Price.ExportPencePerKwh > slot.Price.ImportPencePerKwh;
 
-            // Export takes priority over cheap import (can't do both)
-            if (canExport && slot.Price.ExportPencePerKwh > slot.Price.ImportPencePerKwh)
+            // A future profitable export opportunity exists if there is at least one
+            // expensive-export slot that hasn't passed yet.
+            bool hasFutureExportOpportunity = _planConfig.AllowExport
+                && slot.SlotStart < latestExportOpportunity;
+
+            // Economic bypass: preserve battery charge for a later profitable export by
+            // letting grid cover house load now instead of discharging the battery.
+            // Only kicks in when we are NOT in a charging or exporting slot.
+            bool shouldEconomicBypass = _planConfig.AllowEconomicBypass
+                && !canCharge
+                && !canExport
+                && hasFutureExportOpportunity
+                && batteryPercent > minPercent + 5.0; // keep a worthwhile reserve
+
+            if (canExport)
             {
                 action = BatteryAction.ExportToGrid;
-                double exportWh = Math.Min(_batteryConfig.MaxExportWatts * slotHours,
+                double exportWh = Math.Min(
+                    _batteryConfig.MaxExportWatts * slotHours,
                     (batteryPercent - minPercent) / 100.0 * capacityWh);
-                batteryDeltaWh = -exportWh; // discharging
+                batteryDeltaWh = -exportWh;
             }
             else if (canCharge)
             {
                 action = BatteryAction.ImportFromGrid;
-                double importWh = Math.Min(_batteryConfig.MaxImportWatts * slotHours,
+                double importWh = Math.Min(
+                    _batteryConfig.MaxImportWatts * slotHours,
                     (maxPercent - batteryPercent) / 100.0 * capacityWh);
-                batteryDeltaWh = importWh * efficiency; // charging with losses
+                batteryDeltaWh = importWh * efficiency;
+            }
+            else if (shouldEconomicBypass)
+            {
+                // Let grid cover the load; battery charge is preserved for future export.
+                action = BatteryAction.BypassBatteryOnlyUseGrid;
+                batteryDeltaWh = 0;
             }
             else if (netSolarWatts > 0 && batteryPercent >= maxPercent - 1)
             {
@@ -215,10 +301,10 @@ public class EnergyPlanner : IEnergyPlanner
             else
             {
                 action = BatteryAction.NormalBatteryMinimiseGrid;
-                // In normal mode: solar charges battery or supplies load
-                // Net effect on battery: if solar > load, charge; else discharge
+                // Solar charges battery or supplies load; battery makes up any shortfall.
                 batteryDeltaWh = netSolarWatts * slotHours * (netSolarWatts > 0 ? efficiency : 1.0 / efficiency);
-                batteryDeltaWh = Math.Max(-capacityWh * (batteryPercent - minPercent) / 100.0,
+                batteryDeltaWh = Math.Max(
+                    -capacityWh * (batteryPercent - minPercent) / 100.0,
                     Math.Min(capacityWh * (maxPercent - batteryPercent) / 100.0, batteryDeltaWh));
             }
 
@@ -242,50 +328,81 @@ public class EnergyPlanner : IEnergyPlanner
         switch (action)
         {
             case BatteryAction.ImportFromGrid:
-                // Cost = grid import power * time * import price
-                double importKwh = _batteryConfig.MaxImportWatts * slotHours / 1000.0;
-                costPence = (decimal)(importKwh) * slot.Price.ImportPencePerKwh;
-                // Also add house load cost minus solar contribution
+            {
+                // Pay to charge battery from grid
+                double importKwh = Math.Abs(batteryDeltaWh) / (1000.0 * _batteryConfig.RoundTripEfficiency);
+                costPence = (decimal)importKwh * slot.Price.ImportPencePerKwh;
+
+                // Also pay for any house load not covered by solar
                 double netLoad = Math.Max(0, slot.EstimatedLoadWatts - slot.SolarWatts);
                 costPence += (decimal)(netLoad * slotHours / 1000.0) * slot.Price.ImportPencePerKwh;
+
+                // Income from any surplus solar that can be exported while importing
+                double solarSurplus = Math.Max(0, slot.SolarWatts - slot.EstimatedLoadWatts);
+                if (solarSurplus > 0 && slot.Price.ExportPencePerKwh.HasValue)
+                    costPence -= (decimal)(solarSurplus * slotHours / 1000.0) * slot.Price.ExportPencePerKwh.Value;
                 break;
+            }
 
             case BatteryAction.ExportToGrid:
-                // Income = export power * time * export price
+            {
+                // Income from exporting battery energy
                 double exportKwh = Math.Abs(batteryDeltaWh) / 1000.0;
                 decimal exportIncome = (decimal)exportKwh * (slot.Price.ExportPencePerKwh ?? 0);
-                // House load still needs power (from solar or grid)
+
+                // Income from exporting any surplus solar on top
+                double solarSurplus = Math.Max(0, slot.SolarWatts - slot.EstimatedLoadWatts);
+                if (solarSurplus > 0 && slot.Price.ExportPencePerKwh.HasValue)
+                    exportIncome += (decimal)(solarSurplus * slotHours / 1000.0) * slot.Price.ExportPencePerKwh.Value;
+
+                // Cost to supply house load from grid (solar may partially offset this)
                 double houseSolar = Math.Min(slot.SolarWatts, slot.EstimatedLoadWatts);
                 double houseGrid = Math.Max(0, slot.EstimatedLoadWatts - houseSolar);
                 decimal houseCost = (decimal)(houseGrid * slotHours / 1000.0) * slot.Price.ImportPencePerKwh;
+
                 costPence = houseCost - exportIncome;
                 break;
+            }
 
             case BatteryAction.BypassBatteryOnlyUseGrid:
-                // Grid covers the house load (solar may reduce it)
-                double bypassSolar = Math.Min(slot.SolarWatts, slot.EstimatedLoadWatts);
-                double bypassGrid = Math.Max(0, slot.EstimatedLoadWatts - bypassSolar);
-                costPence = (decimal)(bypassGrid * slotHours / 1000.0) * slot.Price.ImportPencePerKwh;
+            {
+                // Grid covers any load not met by solar
+                double loadFromGrid = Math.Max(0, slot.EstimatedLoadWatts - slot.SolarWatts);
+                costPence = (decimal)(loadFromGrid * slotHours / 1000.0) * slot.Price.ImportPencePerKwh;
+
+                // Income from exporting any surplus solar
+                double solarSurplus = Math.Max(0, slot.SolarWatts - slot.EstimatedLoadWatts);
+                if (solarSurplus > 0 && slot.Price.ExportPencePerKwh.HasValue)
+                    costPence -= (decimal)(solarSurplus * slotHours / 1000.0) * slot.Price.ExportPencePerKwh.Value;
                 break;
+            }
 
             case BatteryAction.NormalBatteryMinimiseGrid:
             default:
-                // Grid covers any shortfall after solar and battery
+            {
                 double normalNet = slot.EstimatedLoadWatts - slot.SolarWatts;
                 if (normalNet > 0)
                 {
-                    // Need grid if battery also cannot cover it fully
-                    double batteryCanSupplyWh = (slot.BatteryChargePercentStart - _batteryConfig.MinChargePercent) / 100.0 * _batteryConfig.CapacityWh;
-                    double batterySupplyWatts = Math.Min(_batteryConfig.MaxExportWatts, batteryCanSupplyWh / slotHours);
+                    // Battery + solar together cover load; grid covers any remaining shortfall
+                    double batteryCanSupplyWh =
+                        (slot.BatteryChargePercentStart - _batteryConfig.MinChargePercent) / 100.0
+                        * _batteryConfig.CapacityWh;
+                    double batterySupplyWatts =
+                        Math.Min(_batteryConfig.MaxExportWatts, batteryCanSupplyWh / slotHours);
                     double gridWatts = Math.Max(0, normalNet - batterySupplyWatts);
                     costPence = (decimal)(gridWatts * slotHours / 1000.0) * slot.Price.ImportPencePerKwh;
                 }
                 else
                 {
-                    // Excess solar — could be exported if SEG configured (ignored here)
-                    costPence = 0;
+                    // Excess solar — export surplus if an export price is available
+                    double solarSurplus = -normalNet; // positive value
+                    if (slot.Price.ExportPencePerKwh.HasValue)
+                        costPence = -(decimal)(solarSurplus * slotHours / 1000.0) * slot.Price.ExportPencePerKwh.Value;
+                    else
+                        costPence = 0;
                 }
                 break;
+            }
         }
 
         return costPence;
