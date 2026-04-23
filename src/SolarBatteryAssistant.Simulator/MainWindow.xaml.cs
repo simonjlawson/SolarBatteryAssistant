@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using LiveCharts;
 using LiveCharts.Wpf;
 using Microsoft.Extensions.Configuration;
@@ -11,26 +12,40 @@ using SolarBatteryAssistant.Core.Configuration;
 using SolarBatteryAssistant.Core.Interfaces;
 using SolarBatteryAssistant.Core.Models;
 using SolarBatteryAssistant.Infrastructure;
+using SolarBatteryAssistant.Simulator.DaemonApi;
+using SolarBatteryAssistant.Simulator.Demo;
 using SolarBatteryAssistant.Simulator.ViewModels;
 
 namespace SolarBatteryAssistant.Simulator;
 
 /// <summary>
-/// Main simulator window. Supports:
-/// - Loading and displaying plans from storage
-/// - Simulating a day's actions and estimated cost
-/// - Reviewing historical plan data
-/// - Connecting to live HomeAssistant to fetch real prices/battery state
+/// Main simulator window — supports three operating modes:
+///
+///  1. <b>Demo Mode</b> — no external connections needed.
+///     Uses built-in synthetic price/solar/battery providers so you can explore
+///     the planner output immediately.
+///
+///  2. <b>Daemon Mode</b> — connects to a locally-running
+///     SolarBatteryAssistant daemon via its REST API (<c>/api/plans</c>).
+///     Lets you browse and visualise plans the daemon has already generated.
+///
+///  3. <b>Live HA Mode</b> — connects directly to HomeAssistant, fetches
+///     real Octopus prices and battery state, and generates plans on demand.
 /// </summary>
 public partial class MainWindow : Window
 {
     private readonly SimulatorViewModel _viewModel = new();
+
+    // Shared planning services (set by whichever mode is active)
     private IHost? _serviceHost;
     private IEnergyPriceProvider? _priceProvider;
     private ISolarForecastProvider? _solarProvider;
     private IBatteryStateProvider? _batteryProvider;
     private IEnergyPlanner? _planner;
     private IPlanRepository? _planRepository;
+
+    // Daemon API client (owns its own HttpClient lifecycle)
+    private DaemonApiClient? _daemonClient;
 
     public MainWindow()
     {
@@ -50,14 +65,105 @@ public partial class MainWindow : Window
         };
     }
 
+    // -----------------------------------------------------------------------
+    // Demo Mode
+    // -----------------------------------------------------------------------
+
+    private async void DemoMode_Click(object sender, RoutedEventArgs e)
+    {
+        SetStatus("Demo", Brushes.DarkGreen);
+        FooterLabel.Text = "Demo mode — using synthetic example data.";
+
+        // Parse optional overrides from the toolbar
+        double soc = double.TryParse(DemoBatteryBox.Text, out var s) ? Math.Clamp(s, 0, 100) : 50.0;
+        double solarKwh = double.TryParse(DemoSolarBox.Text, out var kw) ? Math.Max(0, kw) : 20.0;
+
+        // Release any previous live connection
+        ResetConnections();
+
+        // Wire up synthetic providers
+        var battery = new DemoBatteryStateProvider { ChargePercent = soc };
+        var solar = new DemoSolarForecastProvider { PeakDailyWh = solarKwh * 1000 };
+        var prices = new DemoEnergyPriceProvider();
+
+        // Create planner using the Core service (needs DI for config defaults)
+        var host = BuildDemoHost(battery, solar, prices);
+        await host.StartAsync();
+        _serviceHost = host;
+
+        _priceProvider = host.Services.GetRequiredService<IEnergyPriceProvider>();
+        _solarProvider = host.Services.GetRequiredService<ISolarForecastProvider>();
+        _batteryProvider = host.Services.GetRequiredService<IBatteryStateProvider>();
+        _planner = host.Services.GetRequiredService<IEnergyPlanner>();
+        _planRepository = null; // demo doesn't persist plans
+
+        // Immediately generate a plan for the selected date
+        await GenerateAndDisplayPlanAsync();
+    }
+
+    // -----------------------------------------------------------------------
+    // Daemon Mode
+    // -----------------------------------------------------------------------
+
+    private async void ConnectDaemon_Click(object sender, RoutedEventArgs e)
+    {
+        var url = DaemonUrlBox.Text.Trim();
+        if (string.IsNullOrEmpty(url))
+        {
+            MessageBox.Show("Enter the daemon URL (e.g. http://localhost:5100).",
+                "Daemon URL required", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        SetStatus("Connecting...", Brushes.Gray);
+        FooterLabel.Text = $"Connecting to daemon at {url}...";
+
+        try
+        {
+            ResetConnections();
+            _daemonClient = new DaemonApiClient(url);
+
+            if (!await _daemonClient.PingAsync())
+            {
+                SetStatus("Daemon unreachable", Brushes.Red);
+                FooterLabel.Text = "Could not reach the daemon. Is it running?";
+                MessageBox.Show($"Could not reach the daemon at {url}.\n\nMake sure the daemon is running.",
+                    "Daemon not reachable", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            // In daemon mode the client acts as plan repository AND battery provider
+            _planRepository = _daemonClient;
+            _batteryProvider = _daemonClient;
+            _priceProvider = null;  // plans are pre-built by the daemon
+            _solarProvider = null;
+            _planner = null;
+
+            SetStatus($"Daemon ({url})", Brushes.Green);
+            FooterLabel.Text = $"Connected to daemon at {url}.";
+            await RefreshHistoryDatesAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Error", Brushes.Red);
+            FooterLabel.Text = $"Daemon connection error: {ex.Message}";
+            MessageBox.Show($"Connection failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Live HA Mode
+    // -----------------------------------------------------------------------
+
     private async void Connect_Click(object sender, RoutedEventArgs e)
     {
-        StatusLabel.Text = "Connecting...";
+        SetStatus("Connecting...", Brushes.Gray);
         FooterLabel.Text = "Establishing connection to HomeAssistant...";
 
         try
         {
-            _serviceHost = BuildServiceHost();
+            ResetConnections();
+            _serviceHost = BuildHaServiceHost();
             await _serviceHost.StartAsync();
 
             _priceProvider = _serviceHost.Services.GetRequiredService<IEnergyPriceProvider>();
@@ -66,66 +172,53 @@ public partial class MainWindow : Window
             _planner = _serviceHost.Services.GetRequiredService<IEnergyPlanner>();
             _planRepository = _serviceHost.Services.GetRequiredService<IPlanRepository>();
 
-            StatusLabel.Text = "Connected";
-            StatusLabel.Foreground = System.Windows.Media.Brushes.Green;
+            SetStatus("Connected (HA)", Brushes.Green);
             FooterLabel.Text = "Connected to HomeAssistant. Ready.";
-
             await RefreshHistoryDatesAsync();
         }
         catch (Exception ex)
         {
-            StatusLabel.Text = "Connection failed";
-            StatusLabel.Foreground = System.Windows.Media.Brushes.Red;
+            SetStatus("Connection failed", Brushes.Red);
             FooterLabel.Text = $"Error: {ex.Message}";
             MessageBox.Show($"Connection failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Shared plan actions
+    // -----------------------------------------------------------------------
+
     private async void LoadPlan_Click(object sender, RoutedEventArgs e)
     {
         if (DateSelector.SelectedDate == null) return;
-
         var date = DateOnly.FromDateTime(DateSelector.SelectedDate.Value);
 
+        // Try stored plan first
         if (_planRepository != null)
         {
-            var plan = await _planRepository.GetPlanAsync(date);
-            if (plan != null)
+            var stored = await _planRepository.GetPlanAsync(date);
+            if (stored != null)
             {
-                DisplayPlan(plan);
-                FooterLabel.Text = $"Loaded stored plan for {date:dd/MM/yyyy}";
+                DisplayPlan(stored);
+                FooterLabel.Text = $"Loaded stored plan for {date:dd/MM/yyyy}.";
                 return;
             }
         }
 
-        // Generate a new plan if none stored
+        // Generate on-the-fly if providers are available
         if (_priceProvider != null && _solarProvider != null && _batteryProvider != null && _planner != null)
         {
-            FooterLabel.Text = "Fetching prices and generating plan...";
-            try
-            {
-                var prices = await _priceProvider.GetPricesForDateAsync(date);
-                var solar = await _solarProvider.GetForecastAsync(date)
-                    ?? new SolarForecast { ForecastDate = date, RawForecastWatts = 0, ScaleFactor = 0.7 };
-                var battery = await _batteryProvider.GetCurrentStateAsync();
-                var plan = await _planner.GeneratePlanAsync(date, prices, solar, battery);
-
-                if (_planRepository != null)
-                    await _planRepository.SavePlanAsync(plan);
-
-                DisplayPlan(plan);
-                FooterLabel.Text = $"Generated new plan for {date:dd/MM/yyyy}";
-            }
-            catch (Exception ex)
-            {
-                FooterLabel.Text = $"Error generating plan: {ex.Message}";
-                MessageBox.Show(ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+            await GenerateAndDisplayPlanAsync(date);
         }
         else
         {
-            MessageBox.Show("Please connect to HomeAssistant first.", "Not Connected",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            FooterLabel.Text = "No plan available for this date. Try Demo Mode or connect to HA/daemon.";
+            MessageBox.Show(
+                "No stored plan found for this date.\n\n" +
+                "• Use 'Demo Mode' to generate a synthetic plan.\n" +
+                "• Connect to a daemon or live HA to fetch real plans.",
+                "No Plan Available",
+                MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 
@@ -184,6 +277,38 @@ public partial class MainWindow : Window
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    private async Task GenerateAndDisplayPlanAsync(DateOnly? overrideDate = null)
+    {
+        var date = overrideDate ?? (DateSelector.SelectedDate.HasValue
+            ? DateOnly.FromDateTime(DateSelector.SelectedDate.Value)
+            : DateOnly.FromDateTime(DateTime.Today));
+
+        FooterLabel.Text = "Fetching prices and generating plan...";
+        try
+        {
+            var prices = await _priceProvider!.GetPricesForDateAsync(date);
+            var solar = await _solarProvider!.GetForecastAsync(date)
+                        ?? new SolarForecast { ForecastDate = date, RawForecastWatts = 0, ScaleFactor = 0.7 };
+            var battery = await _batteryProvider!.GetCurrentStateAsync();
+            var plan = await _planner!.GeneratePlanAsync(date, prices, solar, battery);
+
+            if (_planRepository != null)
+                await _planRepository.SavePlanAsync(plan);
+
+            DisplayPlan(plan);
+            FooterLabel.Text = $"Generated plan for {date:dd/MM/yyyy}.";
+        }
+        catch (Exception ex)
+        {
+            FooterLabel.Text = $"Error generating plan: {ex.Message}";
+            MessageBox.Show(ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void DisplayPlan(EnergyPlan plan)
     {
         _viewModel.CurrentPlan = plan;
@@ -203,7 +328,56 @@ public partial class MainWindow : Window
         HistoryDates.ItemsSource = dates;
     }
 
-    private IHost BuildServiceHost()
+    private void SetStatus(string text, Brush colour)
+    {
+        StatusLabel.Text = text;
+        StatusLabel.Foreground = colour;
+    }
+
+    private void ResetConnections()
+    {
+        _serviceHost?.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+        _serviceHost?.Dispose();
+        _serviceHost = null;
+
+        _daemonClient?.Dispose();
+        _daemonClient = null;
+
+        _priceProvider = null;
+        _solarProvider = null;
+        _batteryProvider = null;
+        _planner = null;
+        _planRepository = null;
+    }
+
+    // -----------------------------------------------------------------------
+    // DI host builders
+    // -----------------------------------------------------------------------
+
+    private IHost BuildDemoHost(
+        DemoBatteryStateProvider battery,
+        DemoSolarForecastProvider solar,
+        DemoEnergyPriceProvider prices)
+    {
+        return Host.CreateDefaultBuilder()
+            .ConfigureServices((ctx, services) =>
+            {
+                // Use an empty/minimal configuration so defaults kick in
+                var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>())
+                    .Build();
+
+                services.AddSolarBatteryAssistantCore(config);
+
+                // Override the infrastructure providers with demo implementations
+                services.AddSingleton<IEnergyPriceProvider>(prices);
+                services.AddSingleton<ISolarForecastProvider>(solar);
+                services.AddSingleton<IBatteryStateProvider>(battery);
+            })
+            .Build();
+    }
+
+    private IHost BuildHaServiceHost()
     {
         return Host.CreateDefaultBuilder()
             .ConfigureServices((ctx, services) =>
