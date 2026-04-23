@@ -39,6 +39,30 @@ public class PlanningConfiguration
     public bool AllowGridCharging { get; set; } = true;
 
     /// <summary>
+    /// Import price threshold in pence/kWh.  Any slot with an import price at or below
+    /// this value is treated as "very cheap" and triggers grid charging regardless of where
+    /// the slot ranks among the day's prices.  This ensures negative or near-zero prices
+    /// always trigger charging even on days where all prices are low.
+    /// Default 2.0 p/kWh.
+    /// </summary>
+    public decimal VeryCheapImportThresholdPence { get; set; } = 2.0m;
+
+    /// <summary>
+    /// Whether to allow the planner to choose <c>BypassBatteryOnlyUseGrid</c> for economic
+    /// reasons — i.e. to preserve battery charge for a future profitable export opportunity
+    /// rather than discharging it for normal house load now.
+    /// </summary>
+    public bool AllowEconomicBypass { get; set; } = true;
+
+    /// <summary>
+    /// Fixed export rate in pence/kWh applied to all export calculations when set.
+    /// When <c>null</c> the planner uses the dynamic per-slot export price from the tariff
+    /// provider (e.g. Octopus Agile export).  Set this to your SEG or fixed export rate
+    /// if you do not have a dynamic export tariff.
+    /// </summary>
+    public decimal? StaticExportPencePerKwh { get; set; }
+
+    /// <summary>
     /// Time zone identifier for local time calculations (e.g. "Europe/London").
     /// </summary>
     public string TimeZoneId { get; set; } = "Europe/London";
