@@ -1,0 +1,74 @@
+# Solar Battery Assistant - HomeAssistant Configuration
+#
+# Add the following to your configuration.yaml to set up the required
+# scenes and helpers for the Solar Battery Assistant daemon.
+#
+# The C# daemon controls your battery inverter by activating these scenes.
+# Each scene should be configured to send the appropriate commands to your
+# inverter (via modbus, Solaredge, Solis, or other integration).
+
+# ============================================================
+# SCENES
+# Configure these scenes for your specific inverter integration.
+# ============================================================
+scene:
+  - id: "import_from_grid"
+    name: "ImportFromGrid"
+    entities:
+      # Example for a generic inverter via a switch or script
+      # Replace with your actual inverter entities
+      # input_select.battery_mode:
+      #   state: "Force Charge"
+      {}  # placeholder - configure for your inverter
+
+  - id: "export_to_grid"
+    name: "ExportToGrid"
+    entities:
+      # input_select.battery_mode:
+      #   state: "Force Discharge"
+      {}  # placeholder
+
+  - id: "bypass_battery_only_use_grid"
+    name: "BypassBatteryOnlyUseGrid"
+    entities:
+      # input_select.battery_mode:
+      #   state: "Bypass"
+      {}  # placeholder
+
+  - id: "normal_battery_minimise_grid"
+    name: "NormalBatteryMinimiseGrid"
+    entities:
+      # input_select.battery_mode:
+      #   state: "Self Use"
+      {}  # placeholder
+
+# ============================================================
+# HELPERS
+# ============================================================
+input_number:
+  solar_forecast_today:
+    name: "Solar Forecast Today (Wh)"
+    min: 0
+    max: 100000
+    step: 100
+    unit_of_measurement: "Wh"
+    icon: "mdi:solar-power"
+
+# ============================================================
+# SENSORS (template)
+# ============================================================
+template:
+  - sensor:
+      - name: "Battery State of Charge"
+        unit_of_measurement: "%"
+        device_class: battery
+        state: >
+          {{ states('sensor.your_battery_soc_entity') | float(0) }}
+        # Replace 'sensor.your_battery_soc_entity' with your actual battery SoC entity
+
+# ============================================================
+# LONG-LIVED ACCESS TOKEN
+# ============================================================
+# Create a Long-Lived Access Token in HomeAssistant:
+# Profile -> Long-Lived Access Tokens -> Create Token
+# Copy the token into the daemon's appsettings.json

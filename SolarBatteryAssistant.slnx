@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SolarBatteryAssistant.Core/SolarBatteryAssistant.Core.csproj" />
+    <Project Path="src/SolarBatteryAssistant.Daemon/SolarBatteryAssistant.Daemon.csproj" />
+    <Project Path="src/SolarBatteryAssistant.Infrastructure/SolarBatteryAssistant.Infrastructure.csproj" />
+    <Project Path="src/SolarBatteryAssistant.Simulator/SolarBatteryAssistant.Simulator.csproj" />
+  </Folder>
+</Solution>

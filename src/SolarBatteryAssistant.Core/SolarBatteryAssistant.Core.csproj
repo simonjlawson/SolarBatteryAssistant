@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SolarBatteryAssistant.Core</RootNamespace>
+    <AssemblyName>SolarBatteryAssistant.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Use Hosting to pull in consistent versions of all Microsoft.Extensions.* packages -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>
