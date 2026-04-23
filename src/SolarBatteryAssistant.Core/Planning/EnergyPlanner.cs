@@ -14,14 +14,11 @@ namespace SolarBatteryAssistant.Core.Planning;
 ///   1. <b>ExportToGrid</b> — slot is among the most expensive export windows AND battery
 ///      has sufficient charge above minimum.
 ///   2. <b>ImportFromGrid</b> — slot is among the cheapest import windows OR the import
-///      price is at or below <see cref="PlanningConfiguration.VeryChapImportThresholdPence"/>
+///      price is at or below <see cref="PlanningConfiguration.VeryCheapImportThresholdPence"/>
 ///      (catches negative and near-zero prices) AND battery is not already full.
-///   3. <b>BypassBatteryOnlyUseGrid (economic)</b> — import is not cheap enough to charge,
-///      but a future profitable export slot exists; bypass battery (let grid cover load) to
-///      preserve charge for that later export.
-///   4. <b>BypassBatteryOnlyUseGrid (solar)</b> — battery is full and solar generation
-///      exceeds house load; bypass to avoid unnecessary charge cycling.
-///   5. <b>NormalBatteryMinimiseGrid</b> — default.
+///   3. <b>BypassBatteryOnlyUseGrid</b> — battery is full and solar generation exceeds house
+///      load; bypass to avoid unnecessary charge cycling.
+///   4. <b>NormalBatteryMinimiseGrid</b> — default.
 ///
 /// House load is distributed across the day using a configurable daily total with the
 /// majority of consumption concentrated in a configurable active window (default 09:00–21:00).
@@ -219,12 +216,6 @@ public class EnergyPlanner : IEnergyPlanner
         int expensiveCount = Math.Max(1, exportableSlots.Count / 4);
         var expensiveExportSlots = exportableSlots.Take(expensiveCount).Select(s => s.SlotStart).ToHashSet();
 
-        // Precompute the latest expensive-export slot time; used to determine whether a
-        // future export opportunity still exists while iterating forward in time.
-        DateTimeOffset latestExportOpportunity = expensiveExportSlots.Any()
-            ? expensiveExportSlots.Max()
-            : DateTimeOffset.MinValue;
-
         double batteryPercent = initialChargePercent;
         double capacityWh = _batteryConfig.CapacityWh;
         double efficiency = _batteryConfig.RoundTripEfficiency;
@@ -256,20 +247,6 @@ public class EnergyPlanner : IEnergyPlanner
                 // Only export if we earn more than we'd spend re-importing later
                 && slot.Price.ExportPencePerKwh > slot.Price.ImportPencePerKwh;
 
-            // A future profitable export opportunity exists if there is at least one
-            // expensive-export slot that hasn't passed yet.
-            bool hasFutureExportOpportunity = _planConfig.AllowExport
-                && slot.SlotStart < latestExportOpportunity;
-
-            // Economic bypass: preserve battery charge for a later profitable export by
-            // letting grid cover house load now instead of discharging the battery.
-            // Only kicks in when we are NOT in a charging or exporting slot.
-            bool shouldEconomicBypass = _planConfig.AllowEconomicBypass
-                && !canCharge
-                && !canExport
-                && hasFutureExportOpportunity
-                && batteryPercent > minPercent + 5.0; // keep a worthwhile reserve
-
             if (canExport)
             {
                 action = BatteryAction.ExportToGrid;
@@ -285,12 +262,6 @@ public class EnergyPlanner : IEnergyPlanner
                     _batteryConfig.MaxImportWatts * slotHours,
                     (maxPercent - batteryPercent) / 100.0 * capacityWh);
                 batteryDeltaWh = importWh * efficiency;
-            }
-            else if (shouldEconomicBypass)
-            {
-                // Let grid cover the load; battery charge is preserved for future export.
-                action = BatteryAction.BypassBatteryOnlyUseGrid;
-                batteryDeltaWh = 0;
             }
             else if (netSolarWatts > 0 && batteryPercent >= maxPercent - 1)
             {

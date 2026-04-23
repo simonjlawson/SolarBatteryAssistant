@@ -48,13 +48,6 @@ public class PlanningConfiguration
     public decimal VeryCheapImportThresholdPence { get; set; } = 2.0m;
 
     /// <summary>
-    /// Whether to allow the planner to choose <c>BypassBatteryOnlyUseGrid</c> for economic
-    /// reasons — i.e. to preserve battery charge for a future profitable export opportunity
-    /// rather than discharging it for normal house load now.
-    /// </summary>
-    public bool AllowEconomicBypass { get; set; } = true;
-
-    /// <summary>
     /// Fixed export rate in pence/kWh applied to all export calculations when set.
     /// When <c>null</c> the planner uses the dynamic per-slot export price from the tariff
     /// provider (e.g. Octopus Agile export).  Set this to your SEG or fixed export rate

@@ -30,6 +30,20 @@
             <Label Content="Solar kWh:" VerticalAlignment="Center" Margin="4,0,0,0"/>
             <TextBox x:Name="DemoSolarBox" Width="55" VerticalAlignment="Center" Text="20"
                      ToolTip="Peak daily solar (kWh) for demo mode"/>
+            <Label Content="Daily Load kWh:" VerticalAlignment="Center" Margin="4,0,0,0"/>
+            <TextBox x:Name="DemoDailyLoadBox" Width="45" VerticalAlignment="Center" Text="8"
+                     ToolTip="Estimated total house energy use per day in kWh (default 8 kWh)"/>
+            <Label Content="Cheap ≤" VerticalAlignment="Center" Margin="4,0,0,0"/>
+            <TextBox x:Name="DemoCheapThresholdBox" Width="35" VerticalAlignment="Center" Text="2"
+                     ToolTip="Import price threshold in p/kWh — slots at or below this always trigger charging (catches negative / near-zero prices)"/>
+            <Label Content="p" VerticalAlignment="Center"/>
+            <Label Content="Static Export p:" VerticalAlignment="Center" Margin="4,0,0,0"/>
+            <TextBox x:Name="DemoStaticExportBox" Width="40" VerticalAlignment="Center" Text=""
+                     ToolTip="Fixed export rate in p/kWh (leave blank to use dynamic tariff export prices)"/>
+            <CheckBox x:Name="DemoAllowExportBox" VerticalAlignment="Center" IsChecked="True"
+                      Margin="4,0,0,0" ToolTip="Allow the planner to export to grid">Export</CheckBox>
+            <CheckBox x:Name="DemoAllowGridChargingBox" VerticalAlignment="Center" IsChecked="True"
+                      Margin="4,0,0,0" ToolTip="Allow the planner to import from grid to charge battery">Grid Charge</CheckBox>
             <Button x:Name="DemoModeButton" Content="▶ Demo Mode" Click="DemoMode_Click"
                     Padding="8,2" Margin="4,0"
                     Background="#E8F5E9" BorderBrush="#4CAF50"
