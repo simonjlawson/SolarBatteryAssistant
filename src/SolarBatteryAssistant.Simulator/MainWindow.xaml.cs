@@ -15,6 +15,7 @@ using SolarBatteryAssistant.Core.Models;
 using SolarBatteryAssistant.Infrastructure;
 using SolarBatteryAssistant.Simulator.DaemonApi;
 using SolarBatteryAssistant.Simulator.Demo;
+using SolarBatteryAssistant.Simulator.Rates;
 using SolarBatteryAssistant.Simulator.ViewModels;
 
 namespace SolarBatteryAssistant.Simulator;
@@ -64,11 +65,21 @@ public partial class MainWindow : Window
             var haToken = secretConfig["HATOKEN"];
             if (!string.IsNullOrWhiteSpace(haToken))
                 HaTokenBox.Password = haToken;
+            // Try to autofill Octopus credentials from user secrets (keys: Octopus__ApiKey, Octopus__AccountNumber)
+            var octApiKey = secretConfig["Octopus:ApiKey"];
+            if (!string.IsNullOrWhiteSpace(octApiKey))
+                OctopusApiKeyBox.Password = octApiKey;
+
+            var octAccount = secretConfig["Octopus:AccountNumber"];
+            if (!string.IsNullOrWhiteSpace(octAccount))
+                OctopusAccountBox.Text = octAccount;
         }
         catch
         {
             // Ignore failures loading user secrets — simulator should still work without them
         }
+
+
 
         PriceChart.Series = _viewModel.PriceSeries;
         BatteryChart.Series = _viewModel.BatterySeries;
@@ -155,10 +166,10 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // In daemon mode the client acts as plan repository AND battery provider
+            // In daemon mode the client acts as plan repository, battery provider and price provider
             _planRepository = _daemonClient;
             _batteryProvider = _daemonClient;
-            _priceProvider = null;  // plans are pre-built by the daemon
+            _priceProvider = _daemonClient;
             _solarProvider = null;
             _planner = null;
 
@@ -211,6 +222,7 @@ public partial class MainWindow : Window
     // Shared plan actions
     // -----------------------------------------------------------------------
 
+// Placeholder to split context for insertion (no-op)
     private async void LoadPlan_Click(object sender, RoutedEventArgs e)
     {
         if (DateSelector.SelectedDate == null) return;
@@ -243,6 +255,7 @@ public partial class MainWindow : Window
                 "No Plan Available",
                 MessageBoxButton.OK, MessageBoxImage.Information);
         }
+// Placeholder to split context for insertion (no-op)
     }
 
     private async void SimulateDay_Click(object sender, RoutedEventArgs e)
@@ -286,6 +299,22 @@ public partial class MainWindow : Window
         // Date selection is applied when LoadPlan or SimulateDay is explicitly clicked
     }
 
+    // -----------------------------------------------------------------------
+    // Rates dialog
+    // -----------------------------------------------------------------------
+
+    private void EditRates_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new RatesDialog(_priceProvider) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.ResultRates == null)
+            return;
+
+        _priceProvider = new StaticEnergyPriceProvider(dialog.ResultRates);
+        FooterLabel.Text = $"Custom rates loaded ({dialog.ResultRates.Length} slots). " +
+                           "Click 'Load Plan' or '▶ Demo Mode' to simulate with these rates.";
+        SetStatus("Custom Rates", Brushes.DarkOrange);
+    }
+
     private async void HistoryDate_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_planRepository == null || HistoryDates.SelectedItem is not DateOnly date) return;
@@ -297,6 +326,31 @@ public partial class MainWindow : Window
             HistoryGrid.ItemsSource = plan.Slots
                 .Select(s => new PlanSlotViewModel(s))
                 .ToList();
+        }
+    }
+
+    // Clear all stored plans on the connected daemon
+    private async void ClearPlans_Click(object sender, RoutedEventArgs e)
+    {
+        if (_daemonClient == null)
+        {
+            MessageBox.Show("No daemon connected. Connect to a local daemon first.", "No Daemon", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var result = MessageBox.Show("This will delete all stored plan files on the daemon. Continue?", "Confirm Clear Plans", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (result != MessageBoxResult.Yes) return;
+
+        try
+        {
+            await _daemonClient.ClearAllPlansAsync();
+            FooterLabel.Text = "Cleared all stored plans on daemon.";
+            await RefreshHistoryDatesAsync();
+        }
+        catch (Exception ex)
+        {
+            FooterLabel.Text = $"Failed to clear plans: {ex.Message}";
+            MessageBox.Show($"Failed to clear plans: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
