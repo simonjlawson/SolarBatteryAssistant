@@ -3,3 +3,31 @@
 ################################################################################
 
 /.vs
+
+# Build outputs
+**/bin/
+**/obj/
+
+# User-specific files
+*.user
+*.suo
+*.rsuser
+
+# NuGet
+*.nupkg
+*.snupkg
+**/packages/
+!**/packages/build/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# .NET secrets
+**/appsettings.Development.json
+
+# Runtime data
+**/data/plans/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,13 @@
+{
+  "domain": "solar_battery_assistant",
+  "name": "Solar Battery Assistant",
+  "documentation": "https://github.com/simonjlawson/SolarBatteryAssistant",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": ["@simonjlawson"],
+  "version": "0.1.0",
+  "iot_class": "local_polling",
+  "quality_scale": "silver",
+  "config_flow": false,
+  "integration_type": "service"
+}

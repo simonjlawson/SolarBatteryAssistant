@@ -1,0 +1,11 @@
+﻿using System.Windows;
+
+namespace SolarBatteryAssistant.Simulator;
+
+/// <summary>
+/// Interaction logic for App.xaml
+/// </summary>
+public partial class App : Application
+{
+}
+
