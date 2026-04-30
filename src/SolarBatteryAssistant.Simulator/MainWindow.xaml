@@ -20,6 +20,9 @@
             <Button Content="Load Plan" Click="LoadPlan_Click" Padding="8,2"/>
             <Button Content="Simulate Day" Click="SimulateDay_Click" Padding="8,2" Margin="4,0"/>
             <Separator/>
+            <Button Content="Edit Rates…" Click="EditRates_Click" Padding="8,2"
+                    ToolTip="Open the Rates dialog to get, visualise, edit and save import/export rates, then use them for simulation"/>
+            <Separator/>
 
             <!-- Demo mode section -->
             <Label Content="Demo:" VerticalAlignment="Center"/>

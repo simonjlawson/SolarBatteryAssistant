@@ -15,6 +15,7 @@ using SolarBatteryAssistant.Core.Models;
 using SolarBatteryAssistant.Infrastructure;
 using SolarBatteryAssistant.Simulator.DaemonApi;
 using SolarBatteryAssistant.Simulator.Demo;
+using SolarBatteryAssistant.Simulator.Rates;
 using SolarBatteryAssistant.Simulator.ViewModels;
 
 namespace SolarBatteryAssistant.Simulator;
@@ -284,6 +285,22 @@ public partial class MainWindow : Window
     private void DateSelector_SelectedDateChanged(object sender, SelectionChangedEventArgs e)
     {
         // Date selection is applied when LoadPlan or SimulateDay is explicitly clicked
+    }
+
+    // -----------------------------------------------------------------------
+    // Rates dialog
+    // -----------------------------------------------------------------------
+
+    private void EditRates_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new RatesDialog(_priceProvider) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.ResultRates == null)
+            return;
+
+        _priceProvider = new StaticEnergyPriceProvider(dialog.ResultRates);
+        FooterLabel.Text = $"Custom rates loaded ({dialog.ResultRates.Length} slots). " +
+                           "Click 'Load Plan' or '▶ Demo Mode' to simulate with these rates.";
+        SetStatus("Custom Rates", Brushes.DarkOrange);
     }
 
     private async void HistoryDate_SelectionChanged(object sender, SelectionChangedEventArgs e)
