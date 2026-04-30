@@ -21,8 +21,10 @@ public static class InfrastructureServiceExtensions
     public static IServiceCollection AddSolarBatteryInfrastructure(this IServiceCollection services)
     {
         services.AddHttpClient<HomeAssistantClient>();
+        services.AddHttpClient<OctopusAccountService>();
         services.AddHttpClient<OctopusAgilePriceProvider>();
 
+        services.AddSingleton<OctopusAccountService>();
         services.AddSingleton<IEnergyPriceProvider, OctopusAgilePriceProvider>();
         services.AddSingleton<ISolarForecastProvider, HomeAssistantSolarForecastProvider>();
         services.AddSingleton<IBatteryStateProvider, HomeAssistantBatteryStateProvider>();

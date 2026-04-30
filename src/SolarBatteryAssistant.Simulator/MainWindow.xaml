@@ -58,6 +58,12 @@
             <TextBox x:Name="HaUrlBox" Width="190" VerticalAlignment="Center" Text="http://homeassistant.local:8123"/>
             <Label Content="Token:" VerticalAlignment="Center" Margin="4,0,0,0"/>
             <PasswordBox x:Name="HaTokenBox" Width="140" VerticalAlignment="Center"/>
+            <Label Content="Octopus Key:" VerticalAlignment="Center" Margin="4,0,0,0"/>
+            <PasswordBox x:Name="OctopusApiKeyBox" Width="120" VerticalAlignment="Center"
+                         ToolTip="Octopus Energy API key — required for auto-discovering product codes from your account"/>
+            <Label Content="Account:" VerticalAlignment="Center" Margin="4,0,0,0"/>
+            <TextBox x:Name="OctopusAccountBox" Width="100" VerticalAlignment="Center"
+                     ToolTip="Octopus Energy account number (e.g. A-B1C2D3EF) — leave blank to use manually configured product codes"/>
             <Button Content="Connect HA" Click="Connect_Click" Padding="8,2" Margin="4,0"
                     ToolTip="Connect to live HomeAssistant"/>
             <Separator/>

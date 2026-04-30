@@ -21,6 +21,7 @@ public class OctopusAgilePriceProvider : IEnergyPriceProvider
 {
     private readonly HttpClient _http;
     private readonly OctopusConfiguration _config;
+    private readonly OctopusAccountService _accountService;
     private readonly ILogger<OctopusAgilePriceProvider> _logger;
 
     // In-memory cache keyed by date (thread-safe)
@@ -28,10 +29,12 @@ public class OctopusAgilePriceProvider : IEnergyPriceProvider
 
     public OctopusAgilePriceProvider(
         HttpClient http,
+        OctopusAccountService accountService,
         IOptions<DaemonConfiguration> config,
         ILogger<OctopusAgilePriceProvider> logger)
     {
         _http = http;
+        _accountService = accountService;
         _config = config.Value.EnergyPricing.Octopus;
         _logger = logger;
 
@@ -53,14 +56,20 @@ public class OctopusAgilePriceProvider : IEnergyPriceProvider
         if (_cache.TryGetValue(date, out var cached))
             return cached;
 
+        // Resolve product codes from the Account API on first use (no-op if already done or disabled)
+        await _accountService.ResolveProductCodesAsync(cancellationToken);
+
+        var importProductCode = _accountService.ImportProductCode ?? _config.ImportProductCode;
+        var exportProductCode = _accountService.ExportProductCode ?? _config.ExportProductCode;
+
         var importPrices = await FetchRatesAsync(
-            _config.ImportProductCode, date, isExport: false, cancellationToken);
+            importProductCode, date, isExport: false, cancellationToken);
 
         Dictionary<DateTimeOffset, decimal> exportLookup = new();
-        if (!string.IsNullOrEmpty(_config.ExportProductCode))
+        if (!string.IsNullOrEmpty(exportProductCode))
         {
             var exportRates = await FetchRatesAsync(
-                _config.ExportProductCode, date, isExport: true, cancellationToken);
+                exportProductCode, date, isExport: true, cancellationToken);
             exportLookup = exportRates
                 .ToDictionary(r => r.SlotStart, r => r.ImportPencePerKwh);
         }

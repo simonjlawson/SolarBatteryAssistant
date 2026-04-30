@@ -29,6 +29,14 @@ public class OctopusConfiguration
     public string? ApiKey { get; set; }
 
     /// <summary>
+    /// Octopus Energy account number (e.g. A-B1C2D3EF).
+    /// When set together with <see cref="ApiKey"/>, the provider will automatically
+    /// retrieve the active import and export product codes from the Account API
+    /// instead of using the manually configured values.
+    /// </summary>
+    public string? AccountNumber { get; set; }
+
+    /// <summary>
     /// Agile tariff region code.
     /// Valid values: A (East England), B (East Midlands), C (London), D (North Wales),
     /// E (West Midlands), F (North East), G (North West), H (Southern), J (South East),
@@ -38,11 +46,15 @@ public class OctopusConfiguration
 
     /// <summary>
     /// Octopus Agile import product code. Defaults to current Agile product.
+    /// Ignored when <see cref="AccountNumber"/> is provided and product codes are
+    /// discovered automatically from the Account API.
     /// </summary>
     public string ImportProductCode { get; set; } = "AGILE-FLEX-22-11-25";
 
     /// <summary>
     /// Octopus Agile export product code. Leave empty if no export tariff.
+    /// Ignored when <see cref="AccountNumber"/> is provided and product codes are
+    /// discovered automatically from the Account API.
     /// </summary>
     public string? ExportProductCode { get; set; }
 

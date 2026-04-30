@@ -428,14 +428,24 @@ public partial class MainWindow : Window
         return Host.CreateDefaultBuilder()
             .ConfigureServices((ctx, services) =>
             {
+                var configValues = new Dictionary<string, string?>
+                {
+                    [$"{DaemonConfiguration.SectionName}:HomeAssistant:BaseUrl"] = HaUrlBox.Text,
+                    [$"{DaemonConfiguration.SectionName}:HomeAssistant:AccessToken"] = HaTokenBox.Password,
+                    [$"{DaemonConfiguration.SectionName}:EnergyPricing:Octopus:RegionCode"] = "C",
+                    [$"{DaemonConfiguration.SectionName}:EnergyPricing:Octopus:ImportProductCode"] = "AGILE-FLEX-22-11-25"
+                };
+
+                var octopusApiKey = OctopusApiKeyBox.Password;
+                if (!string.IsNullOrWhiteSpace(octopusApiKey))
+                    configValues[$"{DaemonConfiguration.SectionName}:EnergyPricing:Octopus:ApiKey"] = octopusApiKey;
+
+                var octopusAccount = OctopusAccountBox.Text.Trim();
+                if (!string.IsNullOrWhiteSpace(octopusAccount))
+                    configValues[$"{DaemonConfiguration.SectionName}:EnergyPricing:Octopus:AccountNumber"] = octopusAccount;
+
                 var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
-                    .AddInMemoryCollection(new Dictionary<string, string?>
-                    {
-                        [$"{DaemonConfiguration.SectionName}:HomeAssistant:BaseUrl"] = HaUrlBox.Text,
-                        [$"{DaemonConfiguration.SectionName}:HomeAssistant:AccessToken"] = HaTokenBox.Password,
-                        [$"{DaemonConfiguration.SectionName}:EnergyPricing:Octopus:RegionCode"] = "C",
-                        [$"{DaemonConfiguration.SectionName}:EnergyPricing:Octopus:ImportProductCode"] = "AGILE-FLEX-22-11-25"
-                    })
+                    .AddInMemoryCollection(configValues)
                     .Build();
 
                 services.AddSolarBatteryAssistantCore(config);
