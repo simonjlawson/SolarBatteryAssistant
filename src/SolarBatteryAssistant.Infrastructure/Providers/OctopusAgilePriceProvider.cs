@@ -74,11 +74,15 @@ public class OctopusAgilePriceProvider : IEnergyPriceProvider
                 .ToDictionary(r => r.SlotStart, r => r.ImportPencePerKwh);
         }
 
-        // Merge export prices into import prices
-        foreach (var price in importPrices)
-        {
-            if (exportLookup.TryGetValue(price.SlotStart, out decimal exportPrice))
-                price.ExportPencePerKwh = exportPrice;
+            foreach (var price in importPrices)
+            {
+                if (exportLookup.TryGetValue(price.SlotStart, out decimal exportPrice))
+                    // Matched variable Export price with Import variable price
+                    price.ExportPencePerKwh = exportPrice;
+                else
+                    // Must be a static value always use singel value
+                    price.ExportPencePerKwh = exportLookup.FirstOrDefault().Value;
+            }
         }
 
         // Use GetOrAdd to avoid race conditions when adding to the cache
