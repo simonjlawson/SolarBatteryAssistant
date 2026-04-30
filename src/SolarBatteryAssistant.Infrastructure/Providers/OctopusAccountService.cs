@@ -7,8 +7,8 @@ using SolarBatteryAssistant.Core.Configuration;
 namespace SolarBatteryAssistant.Infrastructure.Providers;
 
 /// <summary>
-/// Retrieves the active electricity product codes (import and export) for an
-/// Octopus Energy account using the Account API.
+/// Retrieves the active electricity tariff codes for an Octopus Energy account
+/// using the Account API.
 ///
 /// API documentation:
 /// https://developer.octopus.energy/rest/reference/retail/#accounts-retrieve
@@ -23,8 +23,8 @@ public class OctopusAccountService
     private readonly ILogger<OctopusAccountService> _logger;
 
     // Lazily resolved codes. Null until first successful account lookup.
-    private string? _importProductCode;
-    private string? _exportProductCode;
+    private string? _importTariffCode;
+    private string? _exportTariffCode;
     private bool _lookupAttempted;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
 
@@ -58,9 +58,9 @@ public class OctopusAccountService
         !string.IsNullOrEmpty(_config.ApiKey);
 
     /// <summary>
-    /// Lazily fetches the account and resolves the active import and export
-    /// product codes. Results are cached in memory for the lifetime of this
-    /// service instance. Call this once before using the product codes.
+    /// Lazily fetches the account and resolves the currently-active import and
+    /// export tariff codes from the account's meter-point agreements.
+    /// Results are cached in memory for the lifetime of this service instance.
     /// </summary>
     public async Task ResolveProductCodesAsync(CancellationToken cancellationToken = default)
     {
@@ -73,7 +73,7 @@ public class OctopusAccountService
             _lookupAttempted = true;
 
             _logger.LogInformation(
-                "Fetching Octopus account data for account {AccountNumber} to auto-discover product codes.",
+                "Fetching Octopus account data for account {AccountNumber} to discover active tariffs.",
                 _config.AccountNumber);
 
             var url = $"v1/accounts/{Uri.EscapeDataString(_config.AccountNumber!)}/";
@@ -85,83 +85,60 @@ public class OctopusAccountService
                 return;
             }
 
-            // We may have multiple properties/meter points. Choose the import/export
-            // product code whose tariff indicates the newest date (e.g. AGILE-FLEX-22-11-25)
-            // If no date can be parsed from the product code, fall back to the
-            // agreement valid_to/valid_from timestamps.
-            (string? code, DateTimeOffset key) bestImport = (null, DateTimeOffset.MinValue);
-            (string? code, DateTimeOffset key) bestExport = (null, DateTimeOffset.MinValue);
+            var now = DateTimeOffset.UtcNow;
 
             foreach (var property in account.Properties)
             {
                 foreach (var meterPoint in property.ElectricityMeterPoints ?? [])
                 {
+                    // Find the agreement that is currently active:
+                    //   valid_from <= now  AND  (valid_to is null  OR  valid_to > now)
                     var activeAgreement = meterPoint.Agreements?
-                        .OrderByDescending(a => a.ValidTo ?? DateTimeOffset.MaxValue)
+                        .Where(a => a.ValidFrom <= now &&
+                                    (!a.ValidTo.HasValue || a.ValidTo.Value > now))
+                        .OrderByDescending(a => a.ValidFrom) // most-recently-started wins if multiple match
                         .FirstOrDefault();
 
-                    if (activeAgreement?.TariffCode == null) continue;
-
-                    var productCode = ExtractProductCode(activeAgreement.TariffCode);
-                    if (productCode == null) continue;
-
-                    // Determine a comparison key: prefer a date embedded in the product code
-                    // (format yy-MM-dd or yyyy-MM-dd). If not present, use agreement valid_to
-                    // or valid_from.
-                    DateTimeOffset key;
-                    var parsedDate = ExtractDateFromProductCode(productCode);
-                    if (parsedDate.HasValue)
+                    if (activeAgreement?.TariffCode == null)
                     {
-                        // Treat parsed date as UTC midnight for comparison
-                        key = parsedDate.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-                    }
-                    else if (activeAgreement.ValidTo.HasValue)
-                    {
-                        key = activeAgreement.ValidTo.Value;
-                    }
-                    else
-                    {
-                        key = activeAgreement.ValidFrom;
+                        _logger.LogDebug(
+                            "No currently-active agreement found for {MeterType} meter point {Mpan}.",
+                            meterPoint.IsExport ? "export" : "import",
+                            meterPoint.Mpan);
+                        continue;
                     }
 
                     if (meterPoint.IsExport)
                     {
-                        if (bestExport.code == null || key > bestExport.key)
+                        if (_exportTariffCode == null)
                         {
-                            bestExport = (productCode, key);
+                            _exportTariffCode = activeAgreement.TariffCode;
                             _logger.LogInformation(
-                                "Auto-discovered export product code candidate: {ProductCode} (from tariff {TariffCode}, key {Key})",
-                                productCode, activeAgreement.TariffCode, key);
+                                "Resolved active export tariff: {TariffCode} (MPAN {Mpan}, valid from {From})",
+                                _exportTariffCode, meterPoint.Mpan, activeAgreement.ValidFrom);
                         }
                     }
                     else
                     {
-                        if (bestImport.code == null || key > bestImport.key)
+                        if (_importTariffCode == null)
                         {
-                            bestImport = (productCode, key);
+                            _importTariffCode = activeAgreement.TariffCode;
                             _logger.LogInformation(
-                                "Auto-discovered import product code candidate: {ProductCode} (from tariff {TariffCode}, key {Key})",
-                                productCode, activeAgreement.TariffCode, key);
+                                "Resolved active import tariff: {TariffCode} (MPAN {Mpan}, valid from {From})",
+                                _importTariffCode, meterPoint.Mpan, activeAgreement.ValidFrom);
                         }
                     }
                 }
             }
 
-            if (bestImport.code != null)
-            {
-                _importProductCode = bestImport.code;
-                _logger.LogInformation("Selected import product code: {ProductCode}", _importProductCode);
-            }
-
-            if (bestExport.code != null)
-            {
-                _exportProductCode = bestExport.code;
-                _logger.LogInformation("Selected export product code: {ProductCode}", _exportProductCode);
-            }
+            if (_importTariffCode == null)
+                _logger.LogWarning("Could not resolve an active import tariff from the account. " +
+                                   "Will fall back to configured product code.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to retrieve Octopus account data. Will fall back to configured product codes.");
+            _logger.LogError(ex,
+                "Failed to retrieve Octopus account data. Will fall back to configured product codes.");
         }
         finally
         {
@@ -170,14 +147,28 @@ public class OctopusAccountService
     }
 
     /// <summary>
-    /// Returns the resolved import product code, or null if not yet resolved.
+    /// The currently-active import tariff code resolved from the account
+    /// (e.g. "E-1R-AGILE-FLEX-22-11-25-C"), or <c>null</c> if not yet resolved.
     /// </summary>
-    public string? ImportProductCode => _importProductCode;
+    public string? ImportTariffCode => _importTariffCode;
 
     /// <summary>
-    /// Returns the resolved export product code, or null if not yet resolved.
+    /// The currently-active export tariff code resolved from the account
+    /// (e.g. "E-1R-OUTGOING-AGILE-22-11-25-C"), or <c>null</c> if not yet resolved.
     /// </summary>
-    public string? ExportProductCode => _exportProductCode;
+    public string? ExportTariffCode => _exportTariffCode;
+
+    /// <summary>
+    /// The product code extracted from <see cref="ImportTariffCode"/>, or <c>null</c>.
+    /// </summary>
+    public string? ImportProductCode =>
+        _importTariffCode != null ? ExtractProductCode(_importTariffCode) : null;
+
+    /// <summary>
+    /// The product code extracted from <see cref="ExportTariffCode"/>, or <c>null</c>.
+    /// </summary>
+    public string? ExportProductCode =>
+        _exportTariffCode != null ? ExtractProductCode(_exportTariffCode) : null;
 
     // -------------------------------------------------------------------------
     // Helpers
@@ -185,36 +176,16 @@ public class OctopusAccountService
 
     /// <summary>
     /// Extracts the product code from an Octopus tariff code.
-    /// Tariff code format: {fuel}-{rate_type}-{product_code}-{region}
+    /// Tariff code format: {fuel}-{rate_type}-{product_code}-{single_char_region}
     /// Example: "E-1R-AGILE-FLEX-22-11-25-C" → "AGILE-FLEX-22-11-25"
     /// </summary>
     internal static string? ExtractProductCode(string tariffCode)
     {
-        // Format: E-1R-{product_code}-{single_char_region}
-        // Split into parts and strip the first two segments (fuel + rate type)
-        // and the last segment (single-char region code).
         var parts = tariffCode.Split('-');
         if (parts.Length < 4) return null;
 
-        // Skip first two ("E", "1R") and last one (region char)
+        // Skip first two segments ("E", "1R") and last segment (single-char region code)
         return string.Join("-", parts[2..^1]);
-    }
-
-    private static DateOnly? ExtractDateFromProductCode(string productCode)
-    {
-        // Product code typically ends with a date like 22-11-25 (yy-MM-dd) or 2022-11-25 (yyyy-MM-dd).
-        var parts = productCode.Split('-');
-        if (parts.Length < 3) return null;
-
-        // Try last three parts as yy-MM-dd or yyyy-MM-dd
-        var lastThree = string.Join('-', parts[^3..]);
-
-        if (DateOnly.TryParseExact(lastThree, "yy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var d1))
-            return d1;
-        if (DateOnly.TryParseExact(lastThree, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var d2))
-            return d2;
-
-        return null;
     }
 
     // -------------------------------------------------------------------------
