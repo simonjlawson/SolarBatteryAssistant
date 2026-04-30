@@ -12,76 +12,7 @@
     <DockPanel LastChildFill="True">
 
         <!-- Top toolbar -->
-        <ToolBar DockPanel.Dock="Top" Margin="4">
-            <Label Content="Date:" VerticalAlignment="Center"/>
-            <DatePicker x:Name="DateSelector" SelectedDateChanged="DateSelector_SelectedDateChanged"
-                        VerticalAlignment="Center" Width="130"/>
-            <Separator/>
-            <Button Content="Load Plan" Click="LoadPlan_Click" Padding="8,2"/>
-            <Button Content="Simulate Day" Click="SimulateDay_Click" Padding="8,2" Margin="4,0"/>
-            <Separator/>
-            <Button Content="Edit Rates…" Click="EditRates_Click" Padding="8,2"
-                    ToolTip="Open the Rates dialog to get, visualise, edit and save import/export rates, then use them for simulation"/>
-            <Separator/>
-
-            <!-- Demo mode section -->
-            <Label Content="Demo:" VerticalAlignment="Center"/>
-            <Label Content="Battery:" VerticalAlignment="Center" Margin="4,0,0,0"/>
-            <TextBox x:Name="DemoBatteryBox" Width="45" VerticalAlignment="Center" Text="50"
-                     ToolTip="Starting battery SoC % for demo mode"/>
-            <Label Content="%" VerticalAlignment="Center"/>
-            <Label Content="Solar kWh:" VerticalAlignment="Center" Margin="4,0,0,0"/>
-            <TextBox x:Name="DemoSolarBox" Width="55" VerticalAlignment="Center" Text="20"
-                     ToolTip="Peak daily solar (kWh) for demo mode"/>
-            <Label Content="Daily Load kWh:" VerticalAlignment="Center" Margin="4,0,0,0"/>
-            <TextBox x:Name="DemoDailyLoadBox" Width="45" VerticalAlignment="Center" Text="8"
-                     ToolTip="Estimated total house energy use per day in kWh (default 8 kWh)"/>
-            <Label Content="Constant W:" VerticalAlignment="Center" Margin="4,0,0,0"/>
-            <TextBox x:Name="DemoConstantLoadBox" Width="45" VerticalAlignment="Center" Text="100"
-                     ToolTip="Always-on baseline load in Watts added to every slot (fridges, routers, standby devices). Default 100 W."/>
-            <Label Content="Cheap ≤" VerticalAlignment="Center" Margin="4,0,0,0"/>
-            <TextBox x:Name="DemoCheapThresholdBox" Width="35" VerticalAlignment="Center" Text="2"
-                     ToolTip="Import price threshold in p/kWh — slots at or below this always trigger charging (catches negative / near-zero prices)"/>
-            <Label Content="p" VerticalAlignment="Center"/>
-            <Label Content="Static Export p:" VerticalAlignment="Center" Margin="4,0,0,0"/>
-            <TextBox x:Name="DemoStaticExportBox" Width="40" VerticalAlignment="Center" Text=""
-                     ToolTip="Fixed export rate in p/kWh (leave blank to use dynamic tariff export prices)"/>
-            <CheckBox x:Name="DemoAllowExportBox" VerticalAlignment="Center" IsChecked="True"
-                      Margin="4,0,0,0" ToolTip="Allow the planner to export to grid">Export</CheckBox>
-            <CheckBox x:Name="DemoAllowGridChargingBox" VerticalAlignment="Center" IsChecked="True"
-                      Margin="4,0,0,0" ToolTip="Allow the planner to import from grid to charge battery">Grid Charge</CheckBox>
-            <Button x:Name="DemoModeButton" Content="▶ Demo Mode" Click="DemoMode_Click"
-                    Padding="8,2" Margin="4,0"
-                    Background="#E8F5E9" BorderBrush="#4CAF50"
-                    ToolTip="Generate a plan using built-in example data — no HA connection needed"/>
-            <Separator/>
-
-            <!-- Live HA section -->
-            <Label Content="HA URL:" VerticalAlignment="Center"/>
-            <TextBox x:Name="HaUrlBox" Width="190" VerticalAlignment="Center" Text="http://homeassistant.local:8123"/>
-            <Label Content="Token:" VerticalAlignment="Center" Margin="4,0,0,0"/>
-            <PasswordBox x:Name="HaTokenBox" Width="140" VerticalAlignment="Center"/>
-            <Label Content="Octopus Key:" VerticalAlignment="Center" Margin="4,0,0,0"/>
-            <PasswordBox x:Name="OctopusApiKeyBox" Width="120" VerticalAlignment="Center"
-                         ToolTip="Octopus Energy API key — required for auto-discovering product codes from your account"/>
-            <Label Content="Account:" VerticalAlignment="Center" Margin="4,0,0,0"/>
-            <TextBox x:Name="OctopusAccountBox" Width="100" VerticalAlignment="Center"
-                     ToolTip="Octopus Energy account number (e.g. A-B1C2D3EF) — leave blank to use manually configured product codes"/>
-            <Button Content="Connect HA" Click="Connect_Click" Padding="8,2" Margin="4,0"
-                    ToolTip="Connect to live HomeAssistant"/>
-            <Separator/>
-
-            <!-- Local daemon section -->
-            <Label Content="Daemon:" VerticalAlignment="Center"/>
-            <TextBox x:Name="DaemonUrlBox" Width="160" VerticalAlignment="Center" Text="http://localhost:5100"
-                     ToolTip="URL of locally-running SolarBatteryAssistant daemon"/>
-            <Button Content="Connect Daemon" Click="ConnectDaemon_Click" Padding="8,2" Margin="4,0"
-                    ToolTip="Connect to a local daemon for live plans and battery state"/>
-            <Separator/>
-
-            <TextBlock x:Name="StatusLabel" Text="Offline" VerticalAlignment="Center"
-                       Foreground="Gray" Margin="4,0" FontWeight="SemiBold"/>
-        </ToolBar>
+    <!-- Toolbar controls moved into a dedicated TabItem inside the left TabControl -->
 
         <!-- Status bar -->
         <StatusBar DockPanel.Dock="Bottom">
@@ -97,6 +28,115 @@
 
             <!-- Left: Charts -->
             <TabControl Grid.Column="0" Margin="0,0,4,0">
+
+                <!-- Controls Tab (moved from top toolbar) -->
+                <TabItem Header="Controls">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="8" Orientation="Vertical" Width="Auto">
+
+                            <!-- General actions -->
+                            <GroupBox Header="General" Margin="0,0,0,8">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Label Content="Date:" VerticalAlignment="Center"/>
+                                        <DatePicker x:Name="DateSelector" SelectedDateChanged="DateSelector_SelectedDateChanged"
+                                                    VerticalAlignment="Center" Width="130"/>
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+                                        <Button Content="Load Plan" Click="LoadPlan_Click" Padding="8,4" Margin="0,0,6,0"/>
+                                        <Button Content="Simulate Day" Click="SimulateDay_Click" Padding="8,4" Margin="0,0,6,0"/>
+                                        <Button Content="Edit Rates…" Click="EditRates_Click" Padding="8,4"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <!-- Demo controls -->
+                            <GroupBox Header="Demo Mode" Margin="0,0,0,8">
+                                <Grid Margin="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="120"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="120"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="120"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <Label Grid.Row="0" Grid.Column="0" Content="Battery:" VerticalAlignment="Center"/>
+                                    <TextBox Grid.Row="0" Grid.Column="1" x:Name="DemoBatteryBox" Width="45" Text="50" ToolTip="Starting battery SoC % for demo mode"/>
+                                    <Label Grid.Row="0" Grid.Column="2" Content="Solar kWh:" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                    <TextBox Grid.Row="0" Grid.Column="3" x:Name="DemoSolarBox" Width="80" Text="20" ToolTip="Peak daily solar (kWh) for demo mode"/>
+                                    <Label Grid.Row="0" Grid.Column="4" Content="Daily Load kWh:" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                    <TextBox Grid.Row="0" Grid.Column="5" x:Name="DemoDailyLoadBox" Width="80" Text="8" ToolTip="Estimated total house energy use per day in kWh (default 8 kWh)"/>
+
+                                    <Label Grid.Row="1" Grid.Column="0" Content="Constant W:" VerticalAlignment="Center"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="DemoConstantLoadBox" Width="80" Text="100" ToolTip="Always-on baseline load in Watts added to every slot"/>
+                                    <Label Grid.Row="1" Grid.Column="2" Content="Cheap ≤ (p):" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                    <TextBox Grid.Row="1" Grid.Column="3" x:Name="DemoCheapThresholdBox" Width="80" Text="2"/>
+                                    <Label Grid.Row="1" Grid.Column="4" Content="Static Export p:" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                    <TextBox Grid.Row="1" Grid.Column="5" x:Name="DemoStaticExportBox" Width="80"/>
+
+                                    <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="6" Orientation="Horizontal" Margin="0,8,0,0">
+                                        <CheckBox x:Name="DemoAllowExportBox" IsChecked="True" Margin="0,0,8,0">Export</CheckBox>
+                                        <CheckBox x:Name="DemoAllowGridChargingBox" IsChecked="True" Margin="0,0,8,0">Grid Charge</CheckBox>
+                                        <Button x:Name="DemoModeButton" Content="▶ Demo Mode" Click="DemoMode_Click" Padding="8,4" Background="#E8F5E9" BorderBrush="#4CAF50"/>
+                                    </StackPanel>
+                                </Grid>
+                            </GroupBox>
+
+                            <!-- Home Assistant / Octopus -->
+                            <GroupBox Header="Home Assistant / Octopus" Margin="0,0,0,8">
+                                <Grid Margin="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <Label Grid.Row="0" Grid.Column="0" Content="HA URL:" VerticalAlignment="Center"/>
+                                    <TextBox Grid.Row="0" Grid.Column="1" x:Name="HaUrlBox" Width="300" Text="http://homeassistant.local:8123"/>
+                                    <Label Grid.Row="0" Grid.Column="2" Content="Token:" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                    <PasswordBox Grid.Row="0" Grid.Column="3" x:Name="HaTokenBox" Width="220"/>
+
+                                    <Label Grid.Row="1" Grid.Column="0" Content="Octopus Key:" VerticalAlignment="Center"/>
+                                    <PasswordBox Grid.Row="1" Grid.Column="1" x:Name="OctopusApiKeyBox" Width="220" ToolTip="Octopus Energy API key — required for auto-discovering product codes from your account"/>
+                                    <Label Grid.Row="1" Grid.Column="2" Content="Account:" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                    <TextBox Grid.Row="1" Grid.Column="3" x:Name="OctopusAccountBox" Width="160" ToolTip="Octopus Energy account number (e.g. A-B1C2D3EF)"/>
+
+                                    <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4" Orientation="Horizontal" Margin="0,8,0,0">
+                                        <Button Content="Connect HA" Click="Connect_Click" Padding="8,4"/>
+                                    </StackPanel>
+                                </Grid>
+                            </GroupBox>
+
+                            <!-- Local daemon -->
+                            <GroupBox Header="Local Daemon" Margin="0,0,0,8">
+                                <StackPanel Orientation="Horizontal" Margin="6">
+                                    <Label Content="Daemon URL:" VerticalAlignment="Center"/>
+                                    <TextBox x:Name="DaemonUrlBox" Width="260" VerticalAlignment="Center" Text="http://localhost:5100"/>
+                                    <Button Content="Connect Daemon" Click="ConnectDaemon_Click" Padding="8,4" Margin="8,0,0,0"/>
+                                    <Button x:Name="ClearPlansButton" Content="Clear Plans" Click="ClearPlans_Click" Padding="8,4" Margin="8,0,0,0"/>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <!-- Status -->
+                            <StackPanel Orientation="Horizontal" Margin="4">
+                                <TextBlock x:Name="StatusLabel" Text="Offline" Foreground="Gray" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
 
                 <!-- Day Plan Tab -->
                 <TabItem Header="Day Plan">

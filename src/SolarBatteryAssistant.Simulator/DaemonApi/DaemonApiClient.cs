@@ -16,7 +16,7 @@ namespace SolarBatteryAssistant.Simulator.DaemonApi;
 ///   - <see cref="IBatteryStateProvider"/> — read current battery SoC
 ///   - <see cref="IEnergyPriceProvider"/>  — no-op (plans already embed prices)
 /// </summary>
-public class DaemonApiClient : IPlanRepository, IBatteryStateProvider, IDisposable
+public class DaemonApiClient : IPlanRepository, IBatteryStateProvider, Core.Interfaces.IEnergyPriceProvider, IDisposable
 {
     private readonly HttpClient _http;
     private bool _disposed;
@@ -36,6 +36,30 @@ public class DaemonApiClient : IPlanRepository, IBatteryStateProvider, IDisposab
             Timeout = TimeSpan.FromSeconds(10)
         };
     }
+
+    // -----------------------------------------------------------------------
+    // IEnergyPriceProvider (proxy to daemon /api/rates)
+    // -----------------------------------------------------------------------
+
+    public async Task<IReadOnlyList<Core.Models.EnergyPrice>> GetPricesForDateAsync(DateOnly date, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _http.GetAsync($"api/rates/{date:yyyy-MM-dd}", cancellationToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return Array.Empty<Core.Models.EnergyPrice>();
+            response.EnsureSuccessStatusCode();
+            var list = await response.Content.ReadFromJsonAsync<List<Core.Models.EnergyPrice>>(JsonOptions, cancellationToken);
+            return list ?? new List<Core.Models.EnergyPrice>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException($"Failed to fetch rates from daemon: {ex.Message}", ex);
+        }
+    }
+
+    public Task<Core.Models.EnergyPrice?> GetCurrentPriceAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult<Core.Models.EnergyPrice?>(null);
 
     // -----------------------------------------------------------------------
     // IPlanRepository
@@ -78,6 +102,20 @@ public class DaemonApiClient : IPlanRepository, IBatteryStateProvider, IDisposab
 
     public Task SavePlanAsync(EnergyPlan plan, CancellationToken cancellationToken = default)
         => Task.CompletedTask; // read-only client; daemon manages its own storage
+
+    public async Task ClearAllPlansAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _http.DeleteAsync("api/plans", cancellationToken);
+            response.EnsureSuccessStatusCode();
+            return;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException($"Failed to clear plans on daemon: {ex.Message}", ex);
+        }
+    }
 
     // -----------------------------------------------------------------------
     // IBatteryStateProvider

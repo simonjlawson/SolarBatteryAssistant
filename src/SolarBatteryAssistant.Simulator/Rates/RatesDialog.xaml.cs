@@ -19,6 +19,7 @@ namespace SolarBatteryAssistant.Simulator.Rates;
 public partial class RatesDialog : Window
 {
     private readonly IEnergyPriceProvider? _priceProvider;
+    private readonly Core.Interfaces.IPlanRepository? _planRepository;
     private readonly RatesDialogViewModel _viewModel = new();
 
     /// <summary>
@@ -30,13 +31,14 @@ public partial class RatesDialog : Window
     /// Optional price provider from the currently active mode (Live HA / Demo).
     /// When supplied the "Get Today's Rates" button is enabled.
     /// </param>
-    public RatesDialog(IEnergyPriceProvider? priceProvider = null)
+    public RatesDialog(IEnergyPriceProvider? priceProvider = null, Core.Interfaces.IPlanRepository? planRepository = null)
     {
         InitializeComponent();
         DataContext = _viewModel;
         _priceProvider = priceProvider;
+        _planRepository = planRepository;
 
-        GetTodaysRatesButton.IsEnabled = _priceProvider != null;
+        GetTodaysRatesButton.IsEnabled = _priceProvider != null || _planRepository != null;
 
         // Keep the chart in sync with the view model
         PriceChart.Series = _viewModel.PriceSeries;
@@ -55,13 +57,31 @@ public partial class RatesDialog : Window
 
     private async void GetTodaysRates_Click(object sender, RoutedEventArgs e)
     {
-        if (_priceProvider == null) return;
-
         SetStatus("Fetching today's rates…");
         try
         {
             var today = DateOnly.FromDateTime(DateTime.Today);
-            var prices = await _priceProvider.GetPricesForDateAsync(today);
+
+            // Prefer explicit price provider when available
+            IReadOnlyList<Core.Models.EnergyPrice>? prices = null;
+            if (_priceProvider != null)
+            {
+                prices = await _priceProvider.GetPricesForDateAsync(today);
+            }
+            else if (_planRepository != null)
+            {
+                var plan = await _planRepository.GetPlanAsync(today);
+                if (plan?.Slots != null && plan.Slots.Any())
+                    prices = plan.Slots.Select(s => s.Price).ToList();
+            }
+
+            if (prices == null || !prices.Any())
+            {
+                SetStatus("No rates available for today.");
+                MessageBox.Show("No rates available for today from the connected source.", "No Rates", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
             _viewModel.LoadFromPrices(prices);
             RateSetNameBox.Text = today.ToString("yyyy-MM-dd");
             SetStatus($"Loaded {prices.Count} slots for {today:dd/MM/yyyy}.");

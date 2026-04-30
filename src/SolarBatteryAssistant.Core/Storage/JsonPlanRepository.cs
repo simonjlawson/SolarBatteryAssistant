@@ -115,4 +115,27 @@ public class JsonPlanRepository : IPlanRepository
 
         return Task.CompletedTask;
     }
+
+    public Task ClearAllPlansAsync(CancellationToken cancellationToken = default)
+    {
+        var dir = ResolveDataDirectory();
+        if (!Directory.Exists(dir))
+            return Task.CompletedTask;
+
+        var files = Directory.GetFiles(dir, "????-??-??.json");
+        foreach (var file in files)
+        {
+            try
+            {
+                File.Delete(file);
+                _logger.LogInformation("Deleted plan file {File}", file);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete plan file {File}", file);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
 }

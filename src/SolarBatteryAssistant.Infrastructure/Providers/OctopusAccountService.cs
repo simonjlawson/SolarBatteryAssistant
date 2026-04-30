@@ -85,13 +85,19 @@ public class OctopusAccountService
                 return;
             }
 
+            // We may have multiple properties/meter points. Choose the import/export
+            // product code whose tariff indicates the newest date (e.g. AGILE-FLEX-22-11-25)
+            // If no date can be parsed from the product code, fall back to the
+            // agreement valid_to/valid_from timestamps.
+            (string? code, DateTimeOffset key) bestImport = (null, DateTimeOffset.MinValue);
+            (string? code, DateTimeOffset key) bestExport = (null, DateTimeOffset.MinValue);
+
             foreach (var property in account.Properties)
             {
                 foreach (var meterPoint in property.ElectricityMeterPoints ?? [])
                 {
                     var activeAgreement = meterPoint.Agreements?
-                        .Where(a => a.ValidTo == null)
-                        .OrderByDescending(a => a.ValidFrom)
+                        .OrderByDescending(a => a.ValidTo ?? DateTimeOffset.MaxValue)
                         .FirstOrDefault();
 
                     if (activeAgreement?.TariffCode == null) continue;
@@ -99,21 +105,58 @@ public class OctopusAccountService
                     var productCode = ExtractProductCode(activeAgreement.TariffCode);
                     if (productCode == null) continue;
 
-                    if (meterPoint.IsExport)
+                    // Determine a comparison key: prefer a date embedded in the product code
+                    // (format yy-MM-dd or yyyy-MM-dd). If not present, use agreement valid_to
+                    // or valid_from.
+                    DateTimeOffset key;
+                    var parsedDate = ExtractDateFromProductCode(productCode);
+                    if (parsedDate.HasValue)
                     {
-                        _exportProductCode ??= productCode;
-                        _logger.LogInformation(
-                            "Auto-discovered export product code: {ProductCode} (from tariff {TariffCode})",
-                            productCode, activeAgreement.TariffCode);
+                        // Treat parsed date as UTC midnight for comparison
+                        key = parsedDate.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                    }
+                    else if (activeAgreement.ValidTo.HasValue)
+                    {
+                        key = activeAgreement.ValidTo.Value;
                     }
                     else
                     {
-                        _importProductCode ??= productCode;
-                        _logger.LogInformation(
-                            "Auto-discovered import product code: {ProductCode} (from tariff {TariffCode})",
-                            productCode, activeAgreement.TariffCode);
+                        key = activeAgreement.ValidFrom;
+                    }
+
+                    if (meterPoint.IsExport)
+                    {
+                        if (bestExport.code == null || key > bestExport.key)
+                        {
+                            bestExport = (productCode, key);
+                            _logger.LogInformation(
+                                "Auto-discovered export product code candidate: {ProductCode} (from tariff {TariffCode}, key {Key})",
+                                productCode, activeAgreement.TariffCode, key);
+                        }
+                    }
+                    else
+                    {
+                        if (bestImport.code == null || key > bestImport.key)
+                        {
+                            bestImport = (productCode, key);
+                            _logger.LogInformation(
+                                "Auto-discovered import product code candidate: {ProductCode} (from tariff {TariffCode}, key {Key})",
+                                productCode, activeAgreement.TariffCode, key);
+                        }
                     }
                 }
+            }
+
+            if (bestImport.code != null)
+            {
+                _importProductCode = bestImport.code;
+                _logger.LogInformation("Selected import product code: {ProductCode}", _importProductCode);
+            }
+
+            if (bestExport.code != null)
+            {
+                _exportProductCode = bestExport.code;
+                _logger.LogInformation("Selected export product code: {ProductCode}", _exportProductCode);
             }
         }
         catch (Exception ex)
@@ -155,6 +198,23 @@ public class OctopusAccountService
 
         // Skip first two ("E", "1R") and last one (region char)
         return string.Join("-", parts[2..^1]);
+    }
+
+    private static DateOnly? ExtractDateFromProductCode(string productCode)
+    {
+        // Product code typically ends with a date like 22-11-25 (yy-MM-dd) or 2022-11-25 (yyyy-MM-dd).
+        var parts = productCode.Split('-');
+        if (parts.Length < 3) return null;
+
+        // Try last three parts as yy-MM-dd or yyyy-MM-dd
+        var lastThree = string.Join('-', parts[^3..]);
+
+        if (DateOnly.TryParseExact(lastThree, "yy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var d1))
+            return d1;
+        if (DateOnly.TryParseExact(lastThree, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var d2))
+            return d2;
+
+        return null;
     }
 
     // -------------------------------------------------------------------------

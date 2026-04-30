@@ -21,6 +21,7 @@ public class OctopusAgilePriceProvider : IEnergyPriceProvider
 {
     private readonly HttpClient _http;
     private readonly OctopusConfiguration _config;
+    private readonly bool _enableCaching;
     private readonly OctopusAccountService _accountService;
     private readonly ILogger<OctopusAgilePriceProvider> _logger;
 
@@ -36,6 +37,7 @@ public class OctopusAgilePriceProvider : IEnergyPriceProvider
         _http = http;
         _accountService = accountService;
         _config = config.Value.EnergyPricing.Octopus;
+        _enableCaching = _config.EnableUnitRateCaching;
         _logger = logger;
 
         _http.BaseAddress = new Uri(_config.BaseUrl.TrimEnd('/') + "/");
@@ -53,7 +55,7 @@ public class OctopusAgilePriceProvider : IEnergyPriceProvider
     public async Task<IReadOnlyList<EnergyPrice>> GetPricesForDateAsync(
         DateOnly date, CancellationToken cancellationToken = default)
     {
-        if (_cache.TryGetValue(date, out var cached))
+        if (_enableCaching && _cache.TryGetValue(date, out var cached))
             return cached;
 
         // Resolve product codes from the Account API on first use (no-op if already done or disabled)
@@ -82,7 +84,10 @@ public class OctopusAgilePriceProvider : IEnergyPriceProvider
         }
 
         // Use GetOrAdd to avoid race conditions when adding to the cache
-        return _cache.GetOrAdd(date, importPrices);
+        if (_enableCaching)
+            return _cache.GetOrAdd(date, importPrices);
+        else
+            return importPrices;
     }
 
     public async Task<EnergyPrice?> GetCurrentPriceAsync(CancellationToken cancellationToken = default)

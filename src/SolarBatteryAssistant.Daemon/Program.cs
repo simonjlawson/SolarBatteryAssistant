@@ -70,4 +70,29 @@ api.MapGet("/plans/{date}", async (string date, IPlanRepository repo, Cancellati
     return plan is null ? Results.NotFound() : Results.Ok(plan);
 });
 
+/// <summary>GET /api/rates/{date} — unit rates for a specific date (yyyy-MM-dd).</summary>
+api.MapGet("/rates/{date}", async (string date, IEnergyPriceProvider prices, CancellationToken ct) =>
+{
+    if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", out var parsed))
+        return Results.BadRequest("Date must be in yyyy-MM-dd format.");
+
+    var list = await prices.GetPricesForDateAsync(parsed, ct);
+    return Results.Ok(list);
+});
+
+/// <summary>GET /api/rates/today — today's unit rates.</summary>
+api.MapGet("/rates/today", async (IEnergyPriceProvider prices, CancellationToken ct) =>
+{
+    var today = DateOnly.FromDateTime(DateTime.Today);
+    var list = await prices.GetPricesForDateAsync(today, ct);
+    return Results.Ok(list);
+});
+
+/// <summary>DELETE /api/plans — clear all stored plan files and caches.</summary>
+api.MapDelete("/plans", async (IPlanRepository repo, CancellationToken ct) =>
+{
+    await repo.ClearAllPlansAsync(ct);
+    return Results.Ok(new { message = "Cleared stored plans." });
+});
+
 app.Run();
