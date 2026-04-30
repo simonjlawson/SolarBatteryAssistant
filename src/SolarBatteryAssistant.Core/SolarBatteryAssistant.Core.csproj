@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <!-- Use Hosting to pull in consistent versions of all Microsoft.Extensions.* packages -->
+    <PackageReference Include="ImpSoft.OctopusEnergy.Api" Version="3.0.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
   </ItemGroup>
