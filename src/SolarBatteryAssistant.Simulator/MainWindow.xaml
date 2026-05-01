@@ -46,7 +46,9 @@
                                     <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
                                         <Button Content="Load Plan" Click="LoadPlan_Click" Padding="8,4" Margin="0,0,6,0"/>
                                         <Button Content="Simulate Day" Click="SimulateDay_Click" Padding="8,4" Margin="0,0,6,0"/>
-                                        <Button Content="Edit Rates…" Click="EditRates_Click" Padding="8,4"/>
+                                        <Button Content="Edit Rates…" Click="EditRates_Click" Padding="8,4" Margin="0,0,6,0"/>
+                                        <Button Content="Search Files…" Click="SearchFiles_Click" Padding="8,4"
+                                                ToolTip="Search plan and rate-set files — select and drag them to other applications"/>
                                     </StackPanel>
                                 </StackPanel>
                             </GroupBox>
