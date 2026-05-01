@@ -15,7 +15,9 @@ namespace SolarBatteryAssistant.Core.Planning;
 ///      has sufficient charge above minimum.
 ///   2. <b>ImportFromGrid</b> — slot is among the cheapest import windows OR the import
 ///      price is at or below <see cref="PlanningConfiguration.VeryCheapImportThresholdPence"/>
-///      (catches negative and near-zero prices) AND battery is not already full.
+///      (catches negative and near-zero prices) AND battery is not already full AND no later
+///      qualifying slot offers a strictly cheaper price (charging is deferred to the lowest
+///      cost opportunity, including negative-price slots where income is maximised).
 ///   3. <b>BypassBatteryOnlyUseGrid</b> — battery is full and solar generation exceeds house
 ///      load; bypass to avoid unnecessary charge cycling.
 ///   4. <b>NormalBatteryMinimiseGrid</b> — default.
@@ -239,6 +241,21 @@ public class EnergyPlanner : IEnergyPlanner
             bool canCharge = _planConfig.AllowGridCharging
                 && batteryPercent < maxPercent
                 && (cheapSlots.Contains(slot.SlotStart) || isVeryCheap);
+
+            // Defer charging if a later qualifying slot offers a strictly cheaper import price.
+            // This ensures the battery is charged at the lowest possible cost (or maximum income
+            // when prices are negative), rather than filling up too early at a higher price.
+            if (canCharge)
+            {
+                bool hasLaterCheaperSlot = slots
+                    .Any(s => s.SlotStart > slot.SlotStart
+                        && (cheapSlots.Contains(s.SlotStart)
+                            || s.Price.ImportPencePerKwh <= _planConfig.VeryCheapImportThresholdPence)
+                        && s.Price.ImportPencePerKwh < slot.Price.ImportPencePerKwh);
+
+                if (hasLaterCheaperSlot)
+                    canCharge = false;
+            }
 
             bool canExport = _planConfig.AllowExport
                 && slot.Price.ExportPencePerKwh.HasValue
