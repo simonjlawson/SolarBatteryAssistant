@@ -90,8 +90,12 @@ public class SolarForecast
                 ? totalEnergyWh * (hourlyWeights[h] / totalWeight)
                 : 0;
 
-            // Split the hour equally between the :00 and :30 slots
-            double slotWatts = hourlyFractionWh / 0.5 / 2.0; // Wh per slot → average Watts
+            // Each hour is split between two 30-minute slots, so each slot gets half the
+            // hourly energy.  Average Watts = slot energy (Wh) ÷ slot duration (h).
+            // slotEnergyWh = hourlyFractionWh / 2
+            // slotWatts    = slotEnergyWh / 0.5  →  hourlyFractionWh
+            double slotEnergyWh = hourlyFractionWh / 2.0;
+            double slotWatts = slotEnergyWh / 0.5;
 
             profile[new TimeOnly(h, 0)] = slotWatts;
             profile[new TimeOnly(h, 30)] = slotWatts;
