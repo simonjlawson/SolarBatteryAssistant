@@ -23,7 +23,18 @@ public static class ServiceCollectionExtensions
         services.Configure<DaemonConfiguration>(
             configuration.GetSection(DaemonConfiguration.SectionName));
 
-        services.AddSingleton<IEnergyPlanner, EnergyPlanner>();
+        // Select the planner implementation based on configuration.
+        // Read UseBruteForce directly from the section so the decision is made at registration
+        // time without requiring a fully-built IOptions<> pipeline.
+        bool useBruteForce = configuration
+            .GetSection($"{DaemonConfiguration.SectionName}:Planning")
+            .GetValue<bool>(nameof(PlanningConfiguration.UseBruteForce));
+
+        if (useBruteForce)
+            services.AddSingleton<IEnergyPlanner, BruteForceEnergyPlanner>();
+        else
+            services.AddSingleton<IEnergyPlanner, EnergyPlanner>();
+
         services.AddSingleton<IPlanRepository, JsonPlanRepository>();
 
         return services;

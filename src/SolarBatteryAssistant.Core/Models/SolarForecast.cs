@@ -62,4 +62,41 @@ public class SolarForecast
 
         return profile;
     }
+
+    /// <summary>
+    /// Distributes the total Wh forecast across 30-minute slots using caller-supplied
+    /// hourly percentage weights (24 values, one per hour, index 0 = midnight).
+    /// Each hour's energy is split equally between its two 30-minute slots.
+    /// Values need not sum to 100 — they are normalised internally.
+    /// Returns a dictionary keyed by slot start time with average Watts for that slot.
+    /// </summary>
+    /// <param name="hourlyWeights">
+    /// Array of 24 non-negative weight values.  Each weight represents the relative
+    /// proportion of the day's generation that falls within that hour.
+    /// </param>
+    public Dictionary<TimeOnly, double> GetHalfHourlyProfile(double[] hourlyWeights)
+    {
+        if (hourlyWeights == null || hourlyWeights.Length != 24)
+            throw new ArgumentException("hourlyWeights must contain exactly 24 values.", nameof(hourlyWeights));
+
+        double totalWeight = hourlyWeights.Sum();
+        double totalEnergyWh = EffectiveWatts; // raw value is total Wh for day
+
+        var profile = new Dictionary<TimeOnly, double>();
+
+        for (int h = 0; h < 24; h++)
+        {
+            double hourlyFractionWh = totalWeight > 0
+                ? totalEnergyWh * (hourlyWeights[h] / totalWeight)
+                : 0;
+
+            // Split the hour equally between the :00 and :30 slots
+            double slotWatts = hourlyFractionWh / 0.5 / 2.0; // Wh per slot → average Watts
+
+            profile[new TimeOnly(h, 0)] = slotWatts;
+            profile[new TimeOnly(h, 30)] = slotWatts;
+        }
+
+        return profile;
+    }
 }

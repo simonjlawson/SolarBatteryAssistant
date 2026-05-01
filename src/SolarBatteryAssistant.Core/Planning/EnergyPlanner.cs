@@ -24,6 +24,8 @@ namespace SolarBatteryAssistant.Core.Planning;
 ///
 /// House load is distributed across the day using a configurable daily total with the
 /// majority of consumption concentrated in a configurable active window (default 09:00–21:00).
+/// An optional extra-load CSV (<see cref="PlanningConfiguration.ExtraLoadCsvPath"/>) is
+/// added on top of the base profile for each hour.
 ///
 /// Cost calculations include income from exporting surplus solar to the grid at either the
 /// dynamic per-slot export price or a configured static export rate.
@@ -35,6 +37,9 @@ public class EnergyPlanner : IEnergyPlanner
     private readonly SolarConfiguration _solarConfig;
     private readonly ILogger<EnergyPlanner> _logger;
 
+    /// <summary>Cached extra-load profile (24 hourly Watt values), or null if not configured.</summary>
+    private double[]? _extraLoadProfile;
+
     public EnergyPlanner(
         IOptions<DaemonConfiguration> config,
         ILogger<EnergyPlanner> logger)
@@ -43,6 +48,8 @@ public class EnergyPlanner : IEnergyPlanner
         _batteryConfig = config.Value.Battery;
         _solarConfig = config.Value.Solar;
         _logger = logger;
+
+        _extraLoadProfile = LoadExtraLoadProfile();
     }
 
     public Task<EnergyPlan> GeneratePlanAsync(
@@ -156,49 +163,13 @@ public class EnergyPlanner : IEnergyPlanner
                 SlotEnd = price.SlotEnd,
                 Price = resolvedPrice,
                 SolarWatts = solarWatts,
-                EstimatedLoadWatts = ComputeSlotLoadWatts(timeKey),
+                EstimatedLoadWatts = SlotLoadHelper.ComputeSlotLoadWatts(
+                    timeKey, _batteryConfig, _extraLoadProfile),
                 Action = BatteryAction.NormalBatteryMinimiseGrid
             });
         }
 
         return slots;
-    }
-
-    /// <summary>
-    /// Returns the estimated house load in Watts for a given local half-hour slot.
-    /// When <see cref="BatteryConfiguration.EstimatedDailyLoadWh"/> is configured the
-    /// load is distributed using the active-window profile; otherwise the flat
-    /// <see cref="BatteryConfiguration.EstimatedHouseLoadWatts"/> is used.
-    /// </summary>
-    private double ComputeSlotLoadWatts(TimeOnly localSlotTime)
-    {
-        if (_batteryConfig.EstimatedDailyLoadWh <= 0)
-            return _batteryConfig.EstimatedHouseLoadWatts + _batteryConfig.ConstantLoadWatts;
-
-        int startH = _batteryConfig.LoadActiveStartHour;
-        int endH = _batteryConfig.LoadActiveEndHour;
-        double dailyWh = _batteryConfig.EstimatedDailyLoadWh;
-        double activeProp = Math.Clamp(_batteryConfig.LoadActiveProportion, 0.0, 1.0);
-
-        // Clamp to valid range (end > start, both 0-23)
-        if (startH < 0 || startH >= 24) startH = 9;
-        if (endH <= startH || endH > 24) endH = startH + 12;
-
-        int activeHours = endH - startH;
-        int offPeakHours = 24 - activeHours;
-
-        // Watts per slot = Wh per hour (each slot is 30 minutes = 0.5 h, but load is in Watts so Wh = W × 0.5)
-        // We want average Watts in the slot: activeWh = dailyWh * activeProp, spread across activeHours hours.
-        double activeWatts = activeHours > 0
-            ? (dailyWh * activeProp) / activeHours
-            : 0;
-        double offPeakWatts = offPeakHours > 0
-            ? (dailyWh * (1 - activeProp)) / offPeakHours
-            : 0;
-
-        int hour = localSlotTime.Hour;
-        bool inActiveWindow = hour >= startH && hour < endH;
-        return (inActiveWindow ? activeWatts : offPeakWatts) + _batteryConfig.ConstantLoadWatts;
     }
 
     private void AssignActions(List<PlanSlot> slots, double initialChargePercent)
@@ -302,97 +273,29 @@ public class EnergyPlanner : IEnergyPlanner
             slot.Action = action;
             slot.BatteryChargePercentStart = batteryPercent;
             slot.BatteryChargePercentEnd = newBatteryPercent;
-            slot.EstimatedCostPence = CalculateSlotCost(slot, action, batteryDeltaWh);
+            slot.EstimatedCostPence = SlotCostCalculator.Calculate(slot, action, batteryDeltaWh, _batteryConfig);
 
             batteryPercent = newBatteryPercent;
         }
     }
 
-    private decimal CalculateSlotCost(PlanSlot slot, BatteryAction action, double batteryDeltaWh)
+    private double[]? LoadExtraLoadProfile()
     {
-        double slotHours = 0.5;
-        decimal costPence = 0;
+        if (string.IsNullOrWhiteSpace(_planConfig.ExtraLoadCsvPath))
+            return null;
 
-        switch (action)
+        CsvProfileLoader.CreateExampleExtraLoadCsv(_planConfig.ExtraLoadCsvPath);
+
+        try
         {
-            case BatteryAction.ImportFromGrid:
-            {
-                // Pay to charge battery from grid
-                double importKwh = Math.Abs(batteryDeltaWh) / (1000.0 * _batteryConfig.RoundTripEfficiency);
-                costPence = (decimal)importKwh * slot.Price.ImportPencePerKwh;
-
-                // Also pay for any house load not covered by solar
-                double netLoad = Math.Max(0, slot.EstimatedLoadWatts - slot.SolarWatts);
-                costPence += (decimal)(netLoad * slotHours / 1000.0) * slot.Price.ImportPencePerKwh;
-
-                // Income from any surplus solar that can be exported while importing
-                double solarSurplus = Math.Max(0, slot.SolarWatts - slot.EstimatedLoadWatts);
-                if (solarSurplus > 0 && slot.Price.ExportPencePerKwh.HasValue)
-                    costPence -= (decimal)(solarSurplus * slotHours / 1000.0) * slot.Price.ExportPencePerKwh.Value;
-                break;
-            }
-
-            case BatteryAction.ExportToGrid:
-            {
-                // Income from exporting battery energy
-                double exportKwh = Math.Abs(batteryDeltaWh) / 1000.0;
-                decimal exportIncome = (decimal)exportKwh * (slot.Price.ExportPencePerKwh ?? 0);
-
-                // Income from exporting any surplus solar on top
-                double solarSurplus = Math.Max(0, slot.SolarWatts - slot.EstimatedLoadWatts);
-                if (solarSurplus > 0 && slot.Price.ExportPencePerKwh.HasValue)
-                    exportIncome += (decimal)(solarSurplus * slotHours / 1000.0) * slot.Price.ExportPencePerKwh.Value;
-
-                // Cost to supply house load from grid (solar may partially offset this)
-                double houseSolar = Math.Min(slot.SolarWatts, slot.EstimatedLoadWatts);
-                double houseGrid = Math.Max(0, slot.EstimatedLoadWatts - houseSolar);
-                decimal houseCost = (decimal)(houseGrid * slotHours / 1000.0) * slot.Price.ImportPencePerKwh;
-
-                costPence = houseCost - exportIncome;
-                break;
-            }
-
-            case BatteryAction.BypassBatteryOnlyUseGrid:
-            {
-                // Grid covers any load not met by solar
-                double loadFromGrid = Math.Max(0, slot.EstimatedLoadWatts - slot.SolarWatts);
-                costPence = (decimal)(loadFromGrid * slotHours / 1000.0) * slot.Price.ImportPencePerKwh;
-
-                // Income from exporting any surplus solar
-                double solarSurplus = Math.Max(0, slot.SolarWatts - slot.EstimatedLoadWatts);
-                if (solarSurplus > 0 && slot.Price.ExportPencePerKwh.HasValue)
-                    costPence -= (decimal)(solarSurplus * slotHours / 1000.0) * slot.Price.ExportPencePerKwh.Value;
-                break;
-            }
-
-            case BatteryAction.NormalBatteryMinimiseGrid:
-            default:
-            {
-                double normalNet = slot.EstimatedLoadWatts - slot.SolarWatts;
-                if (normalNet > 0)
-                {
-                    // Battery + solar together cover load; grid covers any remaining shortfall
-                    double batteryCanSupplyWh =
-                        (slot.BatteryChargePercentStart - _batteryConfig.MinChargePercent) / 100.0
-                        * _batteryConfig.CapacityWh;
-                    double batterySupplyWatts =
-                        Math.Min(_batteryConfig.MaxExportWatts, batteryCanSupplyWh / slotHours);
-                    double gridWatts = Math.Max(0, normalNet - batterySupplyWatts);
-                    costPence = (decimal)(gridWatts * slotHours / 1000.0) * slot.Price.ImportPencePerKwh;
-                }
-                else
-                {
-                    // Excess solar — export surplus if an export price is available
-                    double solarSurplus = -normalNet; // positive value
-                    if (slot.Price.ExportPencePerKwh.HasValue)
-                        costPence = -(decimal)(solarSurplus * slotHours / 1000.0) * slot.Price.ExportPencePerKwh.Value;
-                    else
-                        costPence = 0;
-                }
-                break;
-            }
+            return CsvProfileLoader.LoadExtraLoadHourlyWatts(_planConfig.ExtraLoadCsvPath);
         }
-
-        return costPence;
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not load extra load profile from '{Path}'. Extra load will be zero.",
+                _planConfig.ExtraLoadCsvPath);
+            return null;
+        }
     }
 }
