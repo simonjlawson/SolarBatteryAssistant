@@ -16,6 +16,7 @@ using SolarBatteryAssistant.Infrastructure;
 using SolarBatteryAssistant.Simulator.DaemonApi;
 using SolarBatteryAssistant.Simulator.Demo;
 using SolarBatteryAssistant.Simulator.Rates;
+using SolarBatteryAssistant.Simulator.SearchFiles;
 using SolarBatteryAssistant.Simulator.ViewModels;
 
 namespace SolarBatteryAssistant.Simulator;
@@ -313,6 +314,12 @@ public partial class MainWindow : Window
         FooterLabel.Text = $"Custom rates loaded ({dialog.ResultRates.Length} slots). " +
                            "Click 'Load Plan' or '▶ Demo Mode' to simulate with these rates.";
         SetStatus("Custom Rates", Brushes.DarkOrange);
+    }
+
+    private void SearchFiles_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SearchFilesDialog { Owner = this };
+        dialog.Show();
     }
 
     private async void HistoryDate_SelectionChanged(object sender, SelectionChangedEventArgs e)
