@@ -67,4 +67,10 @@ public class OctopusConfiguration
     /// How many days ahead of prices to cache.
     /// </summary>
     public int CacheDays { get; set; } = 2;
+
+    /// <summary>
+    /// Enable in-memory caching of unit rates. Set to false for debugging to
+    /// always fetch fresh rates from the provider.
+    /// </summary>
+    public bool EnableUnitRateCaching { get; set; } = true;
 }

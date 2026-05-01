@@ -15,4 +15,9 @@ public interface IPlanRepository
 
     /// <summary>Gets all stored plan dates in descending order.</summary>
     Task<IReadOnlyList<DateOnly>> GetAvailablePlanDatesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes all stored plan files and resets any related caches.
+    /// </summary>
+    Task ClearAllPlansAsync(CancellationToken cancellationToken = default);
 }
